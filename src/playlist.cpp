@@ -97,6 +97,16 @@ void back() {
 
 uint16_t position() { return g_pos; }
 
+bool jumpTo(const String &name) {
+  for (uint16_t i = 0; i < g_count; i++) {
+    if (g_names[g_order[i]] == name) {
+      g_pos = i;
+      return true;
+    }
+  }
+  return false;
+}
+
 String peekNext() {
   if (g_count == 0) return String();
   if (g_pos + 1 < g_count) return g_names[g_order[g_pos + 1]];

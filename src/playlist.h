@@ -29,6 +29,11 @@ void back();
 // Where we are in the current pass, for the web UI.
 uint16_t position();
 
+// Points the playlist at a specific photo without disturbing the shuffle order,
+// so the gallery can say "show this one now". False if the name is not in the
+// current list.
+bool jumpTo(const String &name);
+
 // Filename of whatever advance() would land on, without moving. Used to decode
 // one photo ahead so that advancing is instant.
 String peekNext();

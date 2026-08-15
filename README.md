@@ -25,6 +25,10 @@ non-obvious trap: the GY-302's default I2C address collides with the chip that
 runs your backlight and SD card, and the symptom looks like a display fault
 rather than a sensor fault. It is a one-wire fix.
 
+[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) covers the rest — card prep, flashing,
+a bench-test checklist to work through before anything gets mounted, where to put
+the sensor, and what to tell whoever ends up using it.
+
 ## Build and flash
 
 ```sh

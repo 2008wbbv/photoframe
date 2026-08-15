@@ -19,6 +19,7 @@ struct Hooks {
   void (*onNext)() = nullptr;
   void (*onPrev)() = nullptr;
   void (*onPhotosChanged)() = nullptr;  // fired after an upload or delete
+  bool (*onShow)(const char *name) = nullptr;  // jump to one photo from the gallery
   float (*getLux)() = nullptr;
 };
 

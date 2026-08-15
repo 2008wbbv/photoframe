@@ -182,6 +182,15 @@ void goPrev() {
   prepareNext();
 }
 
+// Gallery tapped "show this one". Leaves the shuffle order alone and just moves
+// the cursor, so the rest of the pass carries on from there.
+bool goShow(const char *name) {
+  if (!playlist::jumpTo(String(name))) return false;
+  showCurrent();
+  prepareNext();
+  return true;
+}
+
 void onPhotosChanged() {
   playlist::rescan();
   g_preparedName = "";
@@ -354,6 +363,7 @@ void setup() {
   hooks.onNext = goNext;
   hooks.onPrev = goPrev;
   hooks.onPhotosChanged = onPhotosChanged;
+  hooks.onShow = goShow;
   hooks.getLux = currentLux;
   webui::begin(hooks);
 

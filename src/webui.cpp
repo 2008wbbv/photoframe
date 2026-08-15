@@ -88,12 +88,27 @@ void finishUpload(bool notify) {
 
 void routeIndex() { g_server.send_P(200, "text/html", INDEX_HTML); }
 
+// Filenames come off a FAT directory listing, so they are not guaranteed to be
+// free of characters that would break a JSON string.
+String jsonEscape(const String &s) {
+  String out;
+  out.reserve(s.length() + 2);
+  for (size_t i = 0; i < s.length(); i++) {
+    char c = s[i];
+    if (c == '"' || c == '\\') out += '\\';
+    if ((uint8_t)c < 0x20) continue;  // drop control characters outright
+    out += c;
+  }
+  return out;
+}
+
 void routeStatus() {
   float lux = g_hooks.getLux ? g_hooks.getLux() : -1.0f;
 
   String json = "{";
   json += "\"count\":" + String(playlist::count());
   json += ",\"position\":" + String(playlist::position());
+  json += ",\"current\":\"" + jsonEscape(playlist::current()) + "\"";
   json += ",\"interval_index\":" + String(storage::settings().intervalIndex);
   json += ",\"brightness\":" + String(display::brightness());
   json += ",\"panel_on\":" + String(display::panelOn() ? "true" : "false");
@@ -118,7 +133,7 @@ void routePhotos() {
   for (uint16_t i = 0; i < n; i++) {
     if (i) json += ',';
     json += '"';
-    json += names[i];
+    json += jsonEscape(names[i]);
     json += '"';
   }
   json += ']';
@@ -126,25 +141,37 @@ void routePhotos() {
   g_server.send(200, "application/json", json);
 }
 
-void routeThumb() {
+// Serves a JPEG out of `dir`. Used for both the gallery thumbnails and the
+// full-size image behind a tap.
+void serveImage(const char *dir) {
   String safe = storage::sanitizeName(g_server.arg("name"));
   if (safe.length() == 0) {
     g_server.send(400, "text/plain", "bad name");
     return;
   }
 
-  String path = String(DIR_THUMBS) + "/" + safe;
+  String path = String(dir) + "/" + safe;
   File f = SD.open(path, FILE_READ);
   if (!f) {
-    // Photos copied onto the card by hand have no thumbnail. Say so quietly
-    // rather than shipping the full-size image over Wi-Fi.
-    g_server.send(404, "text/plain", "no thumbnail");
+    // Photos copied onto the card by hand have no thumbnail; the page falls
+    // back to the full-size image when this 404s.
+    g_server.send(404, "text/plain", "not found");
     return;
   }
 
   g_server.sendHeader("Cache-Control", "max-age=86400");
   g_server.streamFile(f, "image/jpeg");
   f.close();
+}
+
+void routeShow() {
+  String safe = storage::sanitizeName(g_server.arg("name"));
+  if (safe.length() == 0 || g_hooks.onShow == nullptr ||
+      !g_hooks.onShow(safe.c_str())) {
+    g_server.send(404, "text/plain", "not found");
+    return;
+  }
+  g_server.send(200, "text/plain", "ok");
 }
 
 void routeDelete() {
@@ -210,7 +237,9 @@ bool begin(const Hooks &hooks) {
   g_server.on("/", HTTP_GET, routeIndex);
   g_server.on("/api/status", HTTP_GET, routeStatus);
   g_server.on("/api/photos", HTTP_GET, routePhotos);
-  g_server.on("/api/thumb", HTTP_GET, routeThumb);
+  g_server.on("/api/thumb", HTTP_GET, []() { serveImage(DIR_THUMBS); });
+  g_server.on("/api/photo", HTTP_GET, []() { serveImage(DIR_PHOTOS); });
+  g_server.on("/api/show", HTTP_POST, routeShow);
   g_server.on("/api/delete", HTTP_POST, routeDelete);
   g_server.on("/api/interval", HTTP_POST, routeInterval);
   g_server.on("/api/next", HTTP_POST, routeNext);
