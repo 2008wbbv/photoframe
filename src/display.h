@@ -1,0 +1,61 @@
+// Panel bring-up, software dimming, and the on-screen overlays.
+//
+// Two full-size RGB565 buffers live in PSRAM:
+//
+//   front  — the image currently on screen, at full brightness
+//   back   — where the next photo is decoded, so advancing is instant
+//
+// Nothing is ever drawn to the panel at full brightness directly. Every photo
+// reaches the framebuffer through blit(), which scales pixel values by the
+// current brightness. That is how dimming works here at all: the backlight is a
+// digital on/off line behind the I2C expander, so there is no PWM to turn down.
+
+#pragma once
+
+#include <stdint.h>
+
+namespace display {
+
+// Brings up the RGB panel and allocates the PSRAM buffers.
+// Returns false if the panel or either buffer could not be allocated.
+bool begin();
+
+// The buffer a photo decoder should write into.
+uint16_t *backBuffer();
+
+// Promotes the back buffer to front and pushes it to the panel. Call this once
+// a decode into backBuffer() has completed.
+void swapBuffers();
+
+// Re-pushes the front buffer to the panel, applying current brightness. Also
+// erases any overlay drawn on top.
+void repaint();
+
+// Fills the front buffer with a solid colour and pushes it.
+void fillFront(uint16_t color);
+
+// 0..255. Values are applied when blitting, not to the backlight. Setting this
+// repaints the screen.
+void setBrightness(uint8_t brightness);
+uint8_t brightness();
+
+// Blanks the panel via the expander's display-enable line. This is the only
+// true "off" available, and it is what night mode uses.
+void setPanelOn(bool on);
+bool panelOn();
+
+// ---------------------------------------------------------------------------
+// Overlays — drawn on top of whatever is on screen. repaint() clears them.
+// ---------------------------------------------------------------------------
+
+// A centred card with a QR code and the join details beneath it.
+void drawWifiQr(const char *ssid, const char *password, const char *url);
+
+// The interval picker. `label` is the human-readable duration, and the dots
+// show which of `count` options is selected.
+void drawIntervalMenu(const char *label, uint8_t index, uint8_t count);
+
+// A centred message card, used for "no photos yet" and error states.
+void drawMessage(const char *title, const char *line1, const char *line2);
+
+}  // namespace display

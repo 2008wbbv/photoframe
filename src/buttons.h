@@ -1,0 +1,30 @@
+// Two momentary buttons, wired switch-to-GND against internal pull-ups.
+//
+// Each button reports a short press on release and a long press the moment it
+// crosses the hold threshold — so holding gives immediate feedback rather than
+// waiting for you to let go, and a hold never also fires a short press.
+
+#pragma once
+
+#include <stdint.h>
+
+namespace buttons {
+
+enum Event : uint8_t {
+  EVENT_NONE = 0,
+  LEFT_SHORT,
+  LEFT_LONG,
+  RIGHT_SHORT,
+  RIGHT_LONG,
+};
+
+void begin();
+
+// Call every loop. Returns one event per call; if both buttons act in the same
+// millisecond the second event is returned on the following call.
+Event poll();
+
+// True while either button is physically down. Used to hold a menu open.
+bool anyHeld();
+
+}  // namespace buttons
