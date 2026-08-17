@@ -16,9 +16,17 @@ left  hold   how long each photo stays up
 | | |
 |---|---|
 | Board | Waveshare ESP32-S3-Touch-LCD-4.3 — ESP32-S3-WROOM-1-N16R8, 800×480 RGB, 16 MB flash, 8 MB PSRAM |
-| Light sensor | BH1750 on a GY-302 module, on the shared I2C bus |
-| Buttons | Two momentary switches, GPIO6 and GPIO15, switch-to-GND |
+| Light sensor | BH1750 on a GY-302 module, on the I2C terminal |
+| Buttons | Two momentary switches sharing GPIO6, on the sensor terminal |
 | Storage | microSD in the onboard slot, **FAT32** |
+
+Both buttons land on one pin because that is all the board offers. Of the four
+terminals on the end, only two carry GPIO at all — the 4-pin I2C terminal, which
+the light sensor takes, and the 3-pin sensor terminal, which brings out GPIO6. The
+RS485 and CAN terminals sit on the far side of their transceivers and carry
+differential pairs, so GPIO15/16 and GPIO19/20 never reach a connector. The two
+buttons therefore share GPIO6 through a 10k resistor ladder and are told apart by
+voltage: 0 V for left, 1.65 V for right, 3.3 V idle.
 
 **Read [`docs/WIRING.md`](docs/WIRING.md) before you solder.** There is one
 non-obvious trap: the GY-302's default I2C address collides with the chip that
@@ -134,7 +142,7 @@ src/
   display.cpp    RGB panel, PSRAM buffers, software dimming, overlays
   photos.cpp     JPEG → RGB565 out of the SD card
   playlist.cpp   shuffle and navigation
-  buttons.cpp    debounce, short vs long press
+  buttons.cpp    ADC ladder decode, debounce, short vs long press
   bh1750.cpp     light sensor
   ch422g.cpp     I/O expander: backlight, LCD reset, SD chip-select
   storage.cpp    SD mount, settings, filename hygiene
@@ -164,5 +172,6 @@ so re-dimming is a re-blit and never a re-decode.
 | Card will not mount | exFAT. Reformat as FAT32. |
 | Shimmer or torn rows | Drop `LCD_PCLK_HZ` in `config.h` to `14000000`. |
 | Night mode never blanks | `EXIO2` vs `EXIO3` differ across board revisions; swap `EXIO_DISP` and `EXIO_LCD_RST` in `ch422g.h`. |
-| Right button unreliable | Make sure it is on GPIO15, not GPIO16 — GPIO16 is a transceiver output that drives against the switch. |
+| Photos advance by themselves; menus open unprompted | GPIO6 is floating. The button ladder's 10k pull-up is missing. |
+| Both buttons do the same thing | The right button's 10k series resistor is missing or bridged. |
 | Photos letterboxed with black bars | Added by hand to the card rather than through the web UI, so they were not cropped to 800×480. |

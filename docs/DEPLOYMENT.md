@@ -11,9 +11,14 @@ problems are much easier to fix before the thing is glued into a frame.
 | Board | Waveshare ESP32-S3-Touch-LCD-4.3 |
 | Sensor | GY-302 / BH1750 module |
 | Buttons | 2 × momentary switches |
+| Resistors | 2 × 10 kΩ, for the button ladder |
 | Card | microSD, **FAT32**, 32 GB or smaller |
 | Power | USB-C supply, 5 V, 1 A or better |
 | Cable | USB-C data cable for flashing |
+
+The board's own cable kit covers the connections: the 4-pin lead goes to the I2C
+terminal for the light sensor, the 3-pin lead to the sensor/ADC terminal for the
+buttons. Both buttons share that one 3-pin lead — see `WIRING.md` for why.
 
 A 32 GB ceiling is not arbitrary: FAT32 is the only filesystem the ESP32's SD
 driver mounts here, and Windows will not format larger cards as FAT32 without
@@ -35,9 +40,18 @@ gallery thumbnail until you re-upload them.
 
 ## 2. Wire it
 
-Follow [`WIRING.md`](WIRING.md). Do not skip the note about the BH1750's `ADDR`
-pin — it is one wire, and getting it wrong produces symptoms that look like a
-broken display rather than a broken sensor.
+Follow [`WIRING.md`](WIRING.md). Two things there are easy to get wrong and both
+produce confusing symptoms:
+
+- The BH1750's **`ADDR` pin must go to 3V3**. One wire, and getting it wrong
+  looks like a broken display rather than a broken sensor.
+- The buttons' **10k pull-up is required**. Without it the frame appears to press
+  its own buttons.
+
+Both buttons land on the single 3-pin sensor terminal through a resistor ladder,
+because that terminal carries the only free GPIO the board brings out — the RS485
+and CAN terminals are on the far side of their transceivers and carry differential
+pairs, not pins you can wire a switch to.
 
 ## 3. Set your password before flashing
 
@@ -73,6 +87,7 @@ tap **RESET** to run the firmware normally.
 Watch the serial monitor through a boot. You want to see all four of these:
 
 ```
+[buttons] resting at 3283 mV (idle should be above 2600)
 [light] BH1750 found at 0x5C
 [sd] mounted, ... MB total
 [wifi] "Rachel's Frame" up at http://192.168.4.1
@@ -97,6 +112,11 @@ Things worth knowing while you test:
 
 - **`[light] *** BH1750 responded on 0x23 ***`** means the `ADDR` jumper did not
   take. Fix it now, not later.
+- **Photos changing on their own, or a menu opening unprompted**, means GPIO6 is
+  floating — check the 10k pull-up. The resting voltage in the boot log tells you
+  directly: it should sit near 3300 mV, not wander.
+- **Both buttons doing the same thing** means the right button's 10k series
+  resistor is missing or bridged, so both are pulling the pin to 0 V.
 - **No `[light]` line at all** means the sensor is not on the bus. The frame
   still runs, just at full brightness with no dimming.
 - **A blank or scrambled panel** usually means `LCD_PCLK_HZ` is too high for

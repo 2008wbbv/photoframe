@@ -53,19 +53,38 @@ static const uint8_t BH1750_ADDR_HIGH = 0x5C;  // ADDR -> 3V3  (use this one)
 static const uint8_t BH1750_ADDR_LOW = 0x23;   // ADDR -> GND  (conflicts!)
 
 // ---------------------------------------------------------------------------
-// Buttons — wired switch-to-GND, using the ESP32's internal pull-ups
+// Buttons — both on one ADC pin, told apart by voltage
 // ---------------------------------------------------------------------------
 //
-// Almost every GPIO on this board is consumed by the RGB bus. These two are
-// broken out on PH2.0 connectors and are free as long as you are not using
-// the ADC / CAN / RS485 peripherals.
+// Only ONE general-purpose GPIO reaches a connector on this board: GPIO6, on
+// the 3-pin sensor/ADC terminal. Everything else is either consumed by the RGB
+// bus or stops at a transceiver — the RS485 terminal carries differential A/B
+// (GPIO15/16 end at the SP3485) and the CAN terminal carries CANH/CANL
+// (GPIO19/20, muxed against native USB by CH422G EXIO5). Neither brings out a
+// usable GPIO, so the alternative would be soldering to the module itself.
 //
-// GPIO15 rather than GPIO16 for the right button, deliberately: GPIO15 is
-// CANTX / RS485 TXD, so onboard it only ever feeds a transceiver *input*, which
-// is high-impedance and will not fight the button. GPIO16 is CANRX / RS485 RXD
-// — a transceiver *output* that idles high and would drive against the switch.
-static const int8_t PIN_BTN_LEFT = 6;   // ADC header
-static const int8_t PIN_BTN_RIGHT = 15; // CAN/RS485 header, TX side
+// Both buttons therefore share GPIO6 through a resistor ladder, and are told
+// apart by the voltage they produce:
+//
+//   3V3 ──[10k]──┬────────────────────── GPIO6      idle    3.30 V
+//                ├──[ LEFT  switch ]──── GND        left    0.00 V
+//                └──[10k]──[ RIGHT ]──── GND        right   1.65 V
+//
+// The external 10k pull-up is required, not optional: without it GPIO6 floats
+// and the frame sees phantom presses. See docs/WIRING.md.
+static const int8_t PIN_BTN_ADC = 6;
+
+// Bands in millivolts, read through the ADC's factory calibration so they do not
+// depend on the attenuation setting. Nominal readings are 0 / 1650 / 3300, a
+// clean split into thirds. Anything landing between bands counts as no press, so
+// a finger half off a switch cannot trigger something unintended.
+static const uint32_t BTN_MV_LEFT_MAX = 700;
+static const uint32_t BTN_MV_RIGHT_MIN = 1150;
+static const uint32_t BTN_MV_RIGHT_MAX = 2150;
+static const uint32_t BTN_MV_IDLE_MIN = 2600;
+
+// The ADC is noisy enough that a few samples are worth averaging.
+static const uint8_t BTN_ADC_SAMPLES = 4;
 
 static const uint32_t BTN_DEBOUNCE_MS = 25;
 static const uint32_t BTN_LONG_PRESS_MS = 700;

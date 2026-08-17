@@ -57,51 +57,99 @@ Mount the sensor so it faces the room, not the panel. Its own backlight leaking
 onto it creates a feedback loop: bright screen → sensor reads bright → stays
 bright. Facing forward next to the frame's edge works well.
 
-## Buttons
+## What the connectors on the end actually give you
 
-Plain momentary switches, one leg to the GPIO and the other to GND. The
-firmware enables the ESP32's internal pull-ups, so there is nothing else to add.
+This is the part that decides how the buttons get wired, and it is not what you
+would guess from the pin table.
 
-| Button | GPIO | Where |
+| Connector | Pins | What is on it |
 |---|---|---|
-| Left | 6 | ADC PH2.0 header |
-| Right | 15 | CAN / RS485 PH2.0 header (TX side) |
+| Sensor / ADC | 3P | `3V3`, `GND`, **GPIO6** — the only free GPIO on any connector |
+| I2C | 4P | `3V3`, `GND`, `GPIO8` (SDA), `GPIO9` (SCL) |
+| RS485 | 2P | Differential **A** / **B** — *not* GPIO |
+| CAN | 2P | Differential **CANH** / **CANL** — *not* GPIO |
 
-### Why GPIO15 and not GPIO16
+The RS485 and CAN terminals sit on the far side of their transceivers: GPIO15/16
+stop at the SP3485 and GPIO19/20 stop at the TJA1051 (and those two are muxed
+against native USB by CH422G `EXIO5`). The 120 Ω termination jumpers next to them
+are the giveaway — termination only exists on a differential bus. **Neither
+connector brings out a pin you can hang a switch on.**
 
-Both are on the CAN/RS485 connector, but they are not equally safe:
+So the board gives you exactly **one** usable GPIO without soldering to the
+module: GPIO6, on the 3-pin sensor terminal. The I2C terminal is spoken for by
+the light sensor.
 
-- **GPIO15** is `CANTX` / RS485 `TXD`. On the board it only feeds a transceiver
-  *input*, which is high-impedance. Nothing fights your switch. Use this one.
-- **GPIO16** is `CANRX` / RS485 `RXD` — a transceiver *output* that idles high.
-  It would actively drive the pin against your button, so the press may not read
-  reliably and you would be sinking the transceiver's drive current through the
-  switch.
+## Buttons: two switches on one pin
 
-Confirm the GPIO numbering against your board's silkscreen or schematic before
-soldering — Waveshare has shipped several revisions of the 4.3" boards, and the
-`B` variant differs. If yours is laid out differently, both pins are single
-constants at the top of `src/config.h`.
+Two buttons, one GPIO, so they are told apart by voltage instead of by pin. One
+10k pull-up and one 10k series resistor is the whole circuit.
 
-If GPIO6 turns out to be unavailable on your unit, GPIO44 (UART0 RXD) is the
-next-best spare, since `Serial` runs over the S3's native USB here and leaves
-UART0 idle.
+```
+                   ┌──[10k]──── 3V3          (from the sensor connector)
+                   │
+  GPIO6 ───────────┤
+                   │
+                   ├──[ LEFT switch ]─────── GND
+                   │
+                   └──[10k]──[ RIGHT ]────── GND
+```
+
+Which gives three clearly separated levels:
+
+| State | Voltage on GPIO6 | Reads as |
+|---|---|---|
+| Nothing pressed | 3.30 V | idle |
+| Right pressed | 1.65 V | next photo |
+| Left pressed | 0.00 V | previous photo |
+
+A clean split into thirds, so the bands in `src/config.h` have ~500 mV of margin
+on each side. Anything landing between bands is treated as no press, which means
+a switch that is not properly closed does nothing rather than something
+surprising. Press both and left wins, since a dead short beats the divider.
+
+**The 10k pull-up is required, not optional.** Without it GPIO6 floats, drifts
+through the bands, and the frame will appear to press its own buttons. If you see
+phantom presses, that resistor is the first thing to check.
+
+Any value from 4.7k to 22k works as long as **both resistors are the same
+value** — the divider only needs to land near half rail, and equal resistors do
+that regardless of the value you pick.
+
+### Checking it
+
+The boot log prints the resting voltage:
+
+```
+[buttons] resting at 3283 mV (idle should be above 2600)
+```
+
+Hold each button and watch the value: left should drop near 0, right to roughly
+1650. If right reads about the same as left, the series resistor is shorted or
+missing. If idle reads low or wanders, the pull-up is not connected.
+
+Confirm GPIO6 is the sensor-terminal pin on your unit before soldering —
+Waveshare has shipped several revisions of the 4.3" boards and the `B` variant
+differs. If yours is wired differently, `PIN_BTN_ADC` is a single constant in
+`src/config.h`. Should you ever need a second real GPIO, GPIO43/44 (UART0) are
+free because `Serial` runs over native USB here, but they mean soldering to the
+board rather than plugging into a connector.
 
 ## GPIO budget, for reference
 
 The 800×480 RGB panel is why there is so little left over.
 
-| Function | GPIO |
-|---|---|
-| RGB data | 1, 2, 42, 41, 40 (R) · 39, 0, 45, 48, 47, 21 (G) · 14, 38, 18, 17, 10 (B) |
-| RGB control | 5 (DE), 3 (VSYNC), 46 (HSYNC), 7 (PCLK) |
-| I2C | 8 (SDA), 9 (SCL) |
-| Touch interrupt | 4 |
-| SD card | 11 (MOSI), 12 (SCK), 13 (MISO) — CS is on CH422G EXIO4 |
-| Flash + PSRAM | 26–37 — never touch these |
-| Native USB | 19, 20 |
-| UART0 | 43, 44 — free here; 43 is used as the SD library's dummy CS |
-| **Buttons** | **6, 15** |
+| Function | GPIO | On a connector? |
+|---|---|---|
+| RGB data | 1, 2, 42, 41, 40 (R) · 39, 0, 45, 48, 47, 21 (G) · 14, 38, 18, 17, 10 (B) | no |
+| RGB control | 5 (DE), 3 (VSYNC), 46 (HSYNC), 7 (PCLK) | no |
+| I2C | 8 (SDA), 9 (SCL) | **yes** — 4P terminal |
+| Touch interrupt | 4 | no |
+| SD card | 11 (MOSI), 12 (SCK), 13 (MISO) — CS is on CH422G EXIO4 | no |
+| RS485 | 15 (TXD), 16 (RXD) | no — stops at the SP3485 |
+| CAN | 19, 20 — shared with native USB via EXIO5 | no — stops at the TJA1051 |
+| Flash + PSRAM | 26–37 — never touch these | no |
+| UART0 | 43, 44 — free here; 43 is the SD library's dummy CS | no |
+| **Buttons** | **6** (both, via the ladder above) | **yes** — 3P sensor terminal |
 
 ## The SD card's chip-select
 

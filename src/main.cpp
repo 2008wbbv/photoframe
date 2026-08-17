@@ -346,6 +346,12 @@ void setup() {
   display::drawMessage("Rachel's Frame", "starting up", "");
 
   buttons::begin();
+  // Printed so a fresh solder job can be checked against the ladder bands in
+  // config.h without any guesswork.
+  Serial.printf("[buttons] resting at %u mV (idle should be above %u)\n",
+                (unsigned)buttons::lastMillivolts(),
+                (unsigned)BTN_MV_IDLE_MIN);
+
   bh1750::begin();
 
   if (storage::begin()) {
