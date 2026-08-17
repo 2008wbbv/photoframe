@@ -70,10 +70,42 @@ network name.
 
 ## 4. Flash
 
+First check your PlatformIO Core version — this needs **6.1.19 or newer**:
+
+```sh
+pio --version
+pio upgrade        # if you are on anything older
+```
+
+On older Core the build fails with `IncompatiblePlatform: Development platform
+'espressif32' ... depends on PlatformIO Core >=6.1.19`. It installs the platform
+and then removes it again, which looks alarming but breaks nothing — upgrade and
+re-run. If `pio upgrade` refuses because the VS Code extension owns the install,
+go at its bundled Python instead:
+
+```powershell
+# Windows
+& "$env:USERPROFILE\.platformio\penv\Scripts\python.exe" -m pip install -U platformio
+```
+
+```sh
+# macOS / Linux
+~/.platformio/penv/bin/python -m pip install -U platformio
+```
+
+Then:
+
 ```sh
 pio run --target upload
 pio device monitor
 ```
+
+Do not use PlatformIO's **New Project** wizard. There is no board definition for
+this Waveshare board — PlatformIO ships only three Waveshare ESP32-S3 definitions
+and this is not one of them — so `platformio.ini` uses the generic
+`esp32-s3-devkitc-1` and spells out the N16R8 module's real flash and PSRAM by
+hand. Open the project folder and the config applies itself; there is no board to
+select anywhere.
 
 The first build downloads a few hundred MB of toolchain. Later builds take
 seconds.

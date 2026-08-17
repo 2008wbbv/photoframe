@@ -39,6 +39,11 @@ the sensor, and what to tell whoever ends up using it.
 
 ## Build and flash
 
+**Requires PlatformIO Core 6.1.19 or newer.** Check with `pio --version`, and run
+`pio upgrade` if you are behind. Older Core refuses the platform below with
+`IncompatiblePlatform: ... depends on PlatformIO Core >=6.1.19`, installs it, then
+rolls it straight back out again.
+
 ```sh
 pio run --target upload
 pio device monitor
