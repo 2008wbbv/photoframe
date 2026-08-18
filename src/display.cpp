@@ -74,6 +74,16 @@ void drawCentered(const char *text, int16_t cx, int16_t y, uint8_t size,
   g_gfx->print(text);
 }
 
+// Draws text with its left edge at `x`. The built-in GFX font is 6x8 pixels per
+// unit of text size, and the cursor sets the glyph's top-left corner.
+void drawLeft(const char *text, int16_t x, int16_t y, uint8_t size,
+              uint16_t color) {
+  g_gfx->setTextSize(size);
+  g_gfx->setTextColor(color);
+  g_gfx->setCursor(x, y);
+  g_gfx->print(text);
+}
+
 // Escapes the characters that are special inside a WIFI: QR payload.
 String escapeWifiField(const char *s) {
   String out;
@@ -183,22 +193,36 @@ void drawWifiQr(const char *ssid, const char *password, const char *url) {
     return;
   }
 
-  const int16_t scale = 8;
-  const int16_t quiet = 4 * scale;  // QR spec wants 4 modules of margin
-  const int16_t qrPx = qr.size * scale;
-  const int16_t cardW = 460;
-  const int16_t cardH = qrPx + quiet * 2 + 130;
+  // Landscape layout: QR on the left, the details beside it. Stacking these
+  // vertically does not fit — 41 modules at a comfortable scale plus two lines
+  // of text is taller than 480 px.
+  const int16_t cardH = 360;
+  const int16_t cardW = 640;
   const int16_t cardX = (SCREEN_W - cardW) / 2;
   const int16_t cardY = (SCREEN_H - cardH) / 2;
+  const int16_t pad = 22;
+
+  // Derive the module scale from the height actually available rather than
+  // hardcoding it, so the card can never overflow the panel. The +8 covers the
+  // 4 modules of quiet zone the QR spec requires on each side.
+  const int16_t avail = cardH - pad * 2;
+  const int16_t scale = avail / (qr.size + 8);
+  if (scale < 2) {  // no sane way to draw it — say something useful instead
+    drawMessage("Upload photos", ssid, url);
+    return;
+  }
+
+  const int16_t quiet = scale * 4;
+  const int16_t block = (int16_t)(qr.size * scale) + quiet * 2;
+  const int16_t blockX = cardX + pad;
+  const int16_t blockY = cardY + (cardH - block) / 2;
 
   drawCard(cardX, cardY, cardW, cardH);
-  drawCentered("Add photos", SCREEN_W / 2, cardY + 22, 3, TEXT_PRIMARY);
 
   // White quiet zone, then the modules. Scanners need the light margin.
-  const int16_t qrX = (SCREEN_W - qrPx) / 2;
-  const int16_t qrY = cardY + 62;
-  g_gfx->fillRect(qrX - quiet, qrY - quiet, qrPx + quiet * 2,
-                  qrPx + quiet * 2, 0xFFFF);
+  g_gfx->fillRect(blockX, blockY, block, block, 0xFFFF);
+  const int16_t qrX = blockX + quiet;
+  const int16_t qrY = blockY + quiet;
   for (uint8_t y = 0; y < qr.size; y++) {
     for (uint8_t x = 0; x < qr.size; x++) {
       if (qrcode_getModule(&qr, x, y)) {
@@ -207,11 +231,28 @@ void drawWifiQr(const char *ssid, const char *password, const char *url) {
     }
   }
 
-  const int16_t textY = qrY + qrPx + quiet + 14;
-  drawCentered(ssid, SCREEN_W / 2, textY, 2, ACCENT);
-  drawCentered(url, SCREEN_W / 2, textY + 26, 2, TEXT_MUTED);
-  drawCentered("scan to join, then upload", SCREEN_W / 2, textY + 52, 1,
-               TEXT_MUTED);
+  // Details column. The password is spelled out as well as encoded, so a phone
+  // that will not scan can still be joined by hand.
+  // The stack below is 220 px tall; start it so the column sits centred in the
+  // card rather than riding high with dead space underneath.
+  const int16_t tx = blockX + block + 28;
+  int16_t ty = cardY + 70;
+
+  drawLeft("Add photos", tx, ty, 3, TEXT_PRIMARY);
+  ty += 52;
+  drawLeft("NETWORK", tx, ty, 1, TEXT_MUTED);
+  ty += 14;
+  drawLeft(ssid, tx, ty, 2, ACCENT);
+  ty += 40;
+  drawLeft("PASSWORD", tx, ty, 1, TEXT_MUTED);
+  ty += 14;
+  drawLeft(password, tx, ty, 2, ACCENT);
+  ty += 40;
+  drawLeft("THEN OPEN", tx, ty, 1, TEXT_MUTED);
+  ty += 14;
+  drawLeft(url, tx, ty, 2, TEXT_PRIMARY);
+  ty += 38;
+  drawLeft("scan to join automatically", tx, ty, 1, TEXT_MUTED);
 }
 
 void drawIntervalMenu(const char *label, uint8_t index, uint8_t count) {

@@ -11,6 +11,10 @@ right hold   QR code → join the frame's Wi-Fi and add photos
 left  hold   how long each photo stays up
 ```
 
+The touchscreen mirrors all four as a backup: the left half of the panel acts as
+the left button, the right half as the right button, and holding is holding. So
+every control stays reachable if a switch ever fails.
+
 ## Hardware
 
 | | |
@@ -107,6 +111,17 @@ downscaled by the nearest power of two the decoder supports and centred, so they
 may letterbox — the web UI's crop is a better fit for the panel. They will have
 no thumbnail in the grid.
 
+### Touch as a backup
+
+The GT911 is polled on the same I2C bus and emits the *same events* the buttons
+do, split down the middle of the panel — left half is the left button, right half
+the right. The state machine never learns which input acted, so there is exactly
+one set of behaviours to reason about rather than two that can drift apart.
+
+Contacts shorter than 40 ms are discarded so a sleeve or a duster brushing the
+glass does not skip a photo. Set `TOUCH_ENABLED` to `false` in `config.h` to
+ignore the panel entirely.
+
 ### Cycle time
 
 Hold the left button to open the interval picker, then tap either button to move
@@ -151,6 +166,7 @@ src/
   photos.cpp     JPEG → RGB565 out of the SD card
   playlist.cpp   shuffle and navigation
   buttons.cpp    ADC ladder decode, debounce, short vs long press
+  touch.cpp      GT911 driver, gestures mapped onto button events
   bh1750.cpp     light sensor
   ch422g.cpp     I/O expander: backlight, LCD reset, SD chip-select
   storage.cpp    SD mount, settings, filename hygiene

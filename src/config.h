@@ -90,6 +90,39 @@ static const uint32_t BTN_DEBOUNCE_MS = 25;
 static const uint32_t BTN_LONG_PRESS_MS = 700;
 
 // ---------------------------------------------------------------------------
+// Touchscreen — a backup for the buttons
+// ---------------------------------------------------------------------------
+//
+// The GT911 shares the I2C bus above and emits the same events the buttons do:
+// the left half of the screen acts as the left button, the right half as the
+// right button, and holding is holding. Every control is therefore reachable by
+// finger if a switch ever fails.
+//
+// Set this to false to make the panel ignore touch entirely.
+static const bool TOUCH_ENABLED = true;
+
+// The controller only produces a new frame every ~10 ms, so polling faster just
+// burns I2C bandwidth that the light sensor also wants.
+static const uint32_t TOUCH_POLL_INTERVAL_MS = 20;
+
+// Contacts shorter than this are discarded. Guards against a sleeve or a duster
+// brushing the glass and skipping a photo.
+static const uint32_t TOUCH_MIN_TAP_MS = 40;
+
+// The GT911's own config decides what orientation it reports in, and that is
+// baked into the panel rather than something we set. If the boot log shows
+// touches landing on the wrong half, or x and y transposed, flip these. The
+// console prints every touch-down coordinate, so it is quick to tell.
+static const bool TOUCH_SWAP_XY = false;
+static const bool TOUCH_INVERT_X = false;
+
+// Safety valve. Nobody holds a finger down for this long, so if we still believe
+// one is down after this the controller has gone quiet mid-contact — and a stuck
+// "held" would pin the interval menu open forever on a device meant to run for
+// months unattended.
+static const uint32_t TOUCH_MAX_HOLD_MS = 10UL * 1000;
+
+// ---------------------------------------------------------------------------
 // SD card (SPI). Chip-select is NOT a GPIO — it hangs off CH422G EXIO4.
 // ---------------------------------------------------------------------------
 

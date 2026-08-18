@@ -134,6 +134,23 @@ differs. If yours is wired differently, `PIN_BTN_ADC` is a single constant in
 free because `Serial` runs over native USB here, but they mean soldering to the
 board rather than plugging into a connector.
 
+## Touchscreen
+
+Nothing to wire — the GT911 is already on the board, on the same I2C bus as
+everything else (0x5D or 0x14; the firmware probes both). It acts as a backup for
+the buttons: left half of the panel is the left button, right half is the right,
+and holding is holding.
+
+If touches land on the wrong half, the panel's GT911 config reports a different
+orientation than assumed. The console prints every touch-down:
+
+```
+[touch] down at 634,210 (right half)
+```
+
+Compare that against where you actually pressed, then set `TOUCH_SWAP_XY` or
+`TOUCH_INVERT_X` in `src/config.h`. `TOUCH_ENABLED = false` turns it off entirely.
+
 ## GPIO budget, for reference
 
 The 800×480 RGB panel is why there is so little left over.

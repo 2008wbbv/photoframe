@@ -6,8 +6,13 @@
 //   right hold  QR code to join the frame's Wi-Fi and upload more
 //   left  hold  how long each photo stays up
 //
+// The touchscreen mirrors all four of those as a backup, splitting the panel
+// down the middle: the left half acts as the left button, the right half as the
+// right button. Both input paths produce the same events, so the state machine
+// below never learns which was used.
+//
 // A BH1750 on the shared I2C bus dims the picture as the room darkens, and
-// blanks the panel entirely at night until a button wakes it.
+// blanks the panel entirely at night until a button or a touch wakes it.
 
 #include <Arduino.h>
 #include <Wire.h>
@@ -20,6 +25,7 @@
 #include "photos.h"
 #include "playlist.h"
 #include "storage.h"
+#include "touch.h"
 #include "webui.h"
 
 namespace {
@@ -354,6 +360,12 @@ void setup() {
 
   bh1750::begin();
 
+  if (TOUCH_ENABLED) {
+    touch::begin();
+  } else {
+    Serial.println("[touch] disabled in config.h");
+  }
+
   if (storage::begin()) {
     storage::loadSettings();
   } else {
@@ -383,7 +395,12 @@ void setup() {
 
 void loop() {
   webui::loop();
+
+  // Buttons and touch speak the same event vocabulary, so the state machine
+  // below neither knows nor cares which one acted.
   handleButton(buttons::poll());
+  handleButton(touch::poll());
+
   updateDimming();
 
   uint32_t now = millis();
@@ -405,7 +422,7 @@ void loop() {
       break;
 
     case State::IntervalMenu:
-      if (!buttons::anyHeld() &&
+      if (!buttons::anyHeld() && !touch::held() &&
           now - g_lastInteraction >= MENU_IDLE_TIMEOUT_MS) {
         storage::saveSettings();
         g_shownAt = now;

@@ -140,11 +140,12 @@ tap **RESET** to run the firmware normally.
 
 ## 5. Bench test before you mount anything
 
-Watch the serial monitor through a boot. You want to see all five of these:
+Watch the serial monitor through a boot. You want to see all six of these:
 
 ```
 [buttons] resting at 3283 mV (idle should be above 2600)
 [light] BH1750 found at 0x5C
+[touch] GT911 found at 0x5D
 [sd] mounted, ... MB total
 [wifi] "Rachel's Frame" up at http://192.168.4.1
 [boot] ready — N photos, 30 sec per photo
@@ -163,6 +164,9 @@ Then check each thing by hand:
 | Scan the QR with a phone | Joins the network, upload page opens by itself |
 | Upload a photo | Appears in the gallery, and in the shuffle |
 | Tap a gallery photo → Remove | Twice to confirm; it disappears |
+| Tap the left / right half of the screen | Same as the matching button |
+| Press and hold the right half | QR code appears, fully on screen and uncropped |
+| Press and hold the left half | Interval picker appears |
 
 Things worth knowing while you test:
 
@@ -173,6 +177,8 @@ Things worth knowing while you test:
   directly: it should sit near 3300 mV, not wander.
 - **Both buttons doing the same thing** means the right button's 10k series
   resistor is missing or bridged, so both are pulling the pin to 0 V.
+- **`[touch] no GT911`** means the controller did not answer on either 0x5D or
+  0x14. The buttons carry on working; only the touch backup is lost.
 - **No `[light]` line at all** means the sensor is not on the bus. The frame
   still runs, just at full brightness with no dimming.
 - **A blank or scrambled panel** usually means `LCD_PCLK_HZ` is too high for
