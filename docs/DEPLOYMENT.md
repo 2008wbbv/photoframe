@@ -74,24 +74,48 @@ First check your PlatformIO Core version — this needs **6.1.19 or newer**:
 
 ```sh
 pio --version
-pio upgrade        # if you are on anything older
 ```
 
 On older Core the build fails with `IncompatiblePlatform: Development platform
 'espressif32' ... depends on PlatformIO Core >=6.1.19`. It installs the platform
-and then removes it again, which looks alarming but breaks nothing — upgrade and
-re-run. If `pio upgrade` refuses because the VS Code extension owns the install,
-go at its bundled Python instead:
+and then removes it again, which looks alarming but breaks nothing.
+
+### Upgrading Core
+
+If you are behind, **delete the Python venv Core runs in and let the PlatformIO
+VS Code extension rebuild it.** Restart VS Code afterwards:
 
 ```powershell
 # Windows
-& "$env:USERPROFILE\.platformio\penv\Scripts\python.exe" -m pip install -U platformio
+Remove-Item -Recurse -Force "$env:USERPROFILE\.platformio\penv"
 ```
 
 ```sh
 # macOS / Linux
-~/.platformio/penv/bin/python -m pip install -U platformio
+rm -rf ~/.platformio/penv
 ```
+
+This is safe: your downloaded toolchains and platforms live in
+`~/.platformio/packages` and `~/.platformio/platforms`, not in `penv`, so nothing
+large is re-fetched — only a small venv is rebuilt. Note that the bare `pio`
+command may be missing from a normal terminal until the extension recreates it,
+so use the terminal inside VS Code or the ✓ Build button.
+
+**Avoid `pio upgrade` on a VS Code-managed install**, especially on Windows. It
+tries to replace files inside the venv it is currently running from, and when
+that half-completes you get a Core that cannot start at all:
+
+```
+ModuleNotFoundError: No module named 'click'
+```
+
+If you are already in that state, reinstall Core with its dependencies:
+
+```powershell
+& "$env:USERPROFILE\.platformio\penv\Scripts\python.exe" -m pip install --force-reinstall platformio
+```
+
+and if that still fails, delete `penv` as above.
 
 Then:
 
@@ -116,7 +140,7 @@ tap **RESET** to run the firmware normally.
 
 ## 5. Bench test before you mount anything
 
-Watch the serial monitor through a boot. You want to see all four of these:
+Watch the serial monitor through a boot. You want to see all five of these:
 
 ```
 [buttons] resting at 3283 mV (idle should be above 2600)

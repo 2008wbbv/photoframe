@@ -39,10 +39,13 @@ the sensor, and what to tell whoever ends up using it.
 
 ## Build and flash
 
-**Requires PlatformIO Core 6.1.19 or newer.** Check with `pio --version`, and run
-`pio upgrade` if you are behind. Older Core refuses the platform below with
-`IncompatiblePlatform: ... depends on PlatformIO Core >=6.1.19`, installs it, then
-rolls it straight back out again.
+**Requires PlatformIO Core 6.1.19 or newer.** Check with `pio --version`. Older
+Core refuses the platform below with `IncompatiblePlatform: ... depends on
+PlatformIO Core >=6.1.19`, installs it, then rolls it straight back out again.
+
+To upgrade, delete `~/.platformio/penv` and let the VS Code extension rebuild it
+— see [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md). Avoid `pio upgrade` on Windows;
+it rewrites the venv it is running from and can leave Core unable to start.
 
 ```sh
 pio run --target upload
@@ -152,8 +155,10 @@ src/
   ch422g.cpp     I/O expander: backlight, LCD reset, SD chip-select
   storage.cpp    SD mount, settings, filename hygiene
   webui.cpp      access point, captive portal, upload endpoints
-  web_page.h     the upload page
-docs/WIRING.md
+  web_page.h     the upload page and gallery
+docs/
+  WIRING.md      connector map, the BH1750 address trap, button ladder
+  DEPLOYMENT.md  card prep, flashing, bench test, mounting, handover
 ```
 
 Two decisions worth knowing if you extend this:
