@@ -1,7 +1,7 @@
 # Deployment
 
 Getting from a bare board to something you can hand over. Work through it in
-order — the bench test in step 5 is the one to not skip, because half of these
+order — the bench test in step 6 is the one to not skip, because half of these
 problems are much easier to fix before the thing is glued into a frame.
 
 ## What you need
@@ -53,22 +53,47 @@ because that terminal carries the only free GPIO the board brings out — the RS
 and CAN terminals are on the far side of their transceivers and carry differential
 pairs, not pins you can wire a switch to.
 
-## 3. Set your password before flashing
+## 3. Optional: set up the Telegram bot
 
-Open `src/config.h` and change:
+Skip this if you only want to add photos over Wi-Fi at home. Do it if you want to
+text photos and notes to the frame from anywhere.
+
+1. Message **@BotFather** on Telegram and send `/newbot`. Answer its two
+   questions and it hands you a token like `8123456:AAH9x...`.
+2. Paste it into `TELEGRAM_BOT_TOKEN` in `src/config.h`.
+3. Flash, then message your own bot anything. The serial console prints:
+   `[telegram] ignoring message from chat id 123456789`.
+4. Put that number in `TELEGRAM_ALLOWED_CHAT_IDS` and flash again.
+
+The second flash is not busywork. **Only ids on that allowlist can send to the
+frame**, and the frame has to run once before it can tell you yours. A bot token
+inside a device you have given away is effectively public, so without the
+allowlist anyone who stumbled onto the bot could put anything they liked on her
+picture frame.
+
+Add more ids to the same array to let family send photos too.
+
+## 4. Set your Wi-Fi password before flashing
+
+This is the password for the frame's *own* setup network, not hers. Open
+`src/config.h` and change:
 
 ```c
 static const char *const AP_PASSWORD = "photoframe";
 ```
 
-Anyone within Wi-Fi range who can read the QR code off the screen can upload to
-the frame, so this is worth a minute. It must be at least 8 characters for WPA2.
+Anyone in range who can read the QR off the screen can upload to the frame while
+it is in setup mode, so this is worth a minute. At least 8 characters for WPA2.
 Nobody has to type it — the QR carries it — so make it whatever you like.
+`AP_SSID` is on the line above if you want a different name.
 
-While you are in there, `AP_SSID` is on the line above if you want a different
-network name.
+**Her own Wi-Fi password is not set here and you never need to know it.** On first
+boot the frame hosts its network and serves a setup card with a list of nearby
+networks; she picks hers, types her password on her own phone, and it is stored in
+NVS. If you want to test on your own network first, do exactly the same thing —
+then hand it over and she can redo it, or use the Forget button.
 
-## 4. Flash
+## 5. Flash
 
 First check your PlatformIO Core version — this needs **6.1.19 or newer**:
 
@@ -138,18 +163,23 @@ If the board is not detected, put it in download mode by hand: hold **BOOT**,
 tap **RESET**, release **BOOT**, then upload again. After a successful flash,
 tap **RESET** to run the firmware normally.
 
-## 5. Bench test before you mount anything
+## 6. Bench test before you mount anything
 
-Watch the serial monitor through a boot. You want to see all six of these:
+Watch the serial monitor through a boot. You want to see all of these:
 
 ```
 [buttons] resting at 3283 mV (idle should be above 2600)
 [light] BH1750 found at 0x5C
 [touch] GT911 found at 0x5D
 [sd] mounted, ... MB total
-[wifi] "Rachel's Frame" up at http://192.168.4.1
+[wifi] portal up: "Rachel's Frame" at http://192.168.4.1
+[telegram] ready, 1 allowed sender(s)
 [boot] ready — N photos, 30 sec per photo
 ```
+
+Once a network is stored, the Wi-Fi line becomes
+`[wifi] joined "HerNetwork" at http://192.168.1.42` followed by
+`[wifi] also reachable at http://photoframe.local`.
 
 Then check each thing by hand:
 
@@ -167,6 +197,10 @@ Then check each thing by hand:
 | Tap the left / right half of the screen | Same as the matching button |
 | Press and hold the right half | QR code appears, fully on screen and uncropped |
 | Press and hold the left half | Interval picker appears |
+| Join `Rachel's Frame`, pick her network, Connect | Frame restarts and joins it |
+| Hold right again once joined | QR now carries the LAN address, not a join code |
+| Text your bot a photo | Lands in the shuffle within a few seconds |
+| Text your bot a note | Shows as a card for 30 s, then back to the slideshow |
 
 Things worth knowing while you test:
 
@@ -186,7 +220,7 @@ Things worth knowing while you test:
 - **Night mode not blanking** means `EXIO2`/`EXIO3` are swapped on your board
   revision. Swap `EXIO_DISP` and `EXIO_LCD_RST` in `ch422g.h`.
 
-## 6. Mount it
+## 7. Mount it
 
 **Point the sensor at the room, not at the panel.** This is the one mounting
 mistake that matters. If the screen's own light reaches the sensor you get a
@@ -204,7 +238,7 @@ The rest:
 - Leave some airflow behind the board. It runs warm continuously — the panel and
   backlight are on whenever the room is lit.
 
-## 7. Power
+## 8. Power
 
 Any decent 5 V USB-C supply rated 1 A or more. This runs continuously, so use a
 real wall adapter rather than a spare phone charger of unknown provenance, and
@@ -213,7 +247,7 @@ do not power it from a laptop port you intend to unplug.
 There is no battery and no shutdown sequence. Pulling power is safe — the only
 writes are during uploads and when saving a setting, both of which are brief.
 
-## 8. Handing it over
+## 9. Handing it over
 
 Everything she needs to know:
 

@@ -172,16 +172,23 @@ void setPanelOn(bool on) {
 
 bool panelOn() { return g_panelOn; }
 
-void drawWifiQr(const char *ssid, const char *password, const char *url) {
-  // Standard Wi-Fi provisioning payload. Scanning this joins the network; the
-  // captive portal then opens the upload page by itself.
-  String payload = "WIFI:T:WPA;S:" + escapeWifiField(ssid) + ";P:" +
-                   escapeWifiField(password) + ";;";
+// One text row in the column beside a QR code.
+struct QrRow {
+  const char *text;
+  uint8_t size;
+  uint16_t color;
+  int16_t gapAfter;
+};
 
-  // Version 6 is 41x41 modules and holds ~134 bytes at ECC medium — ample for a
-  // WIFI: payload. The buffer size is computed here rather than via
-  // qrcode_getBufferSize(), which is a function call and would make this a
-  // variable-length array.
+// Shared layout for both QR cards. Landscape: code on the left, rows on the
+// right. Stacking them vertically does not fit — 41 modules at a readable scale
+// plus several lines of text is taller than 480 px, which is exactly how this
+// used to end up clipped at the top and bottom.
+void drawQrCard(const String &payload, const QrRow *rows, uint8_t rowCount,
+                const char *fallbackTitle, const char *fallbackLine) {
+  // Version 6 is 41x41 modules and holds ~134 bytes at ECC medium, ample for
+  // either payload. Size is computed rather than taken from
+  // qrcode_getBufferSize(), which is a function and would make this a VLA.
   constexpr uint8_t version = 6;
   constexpr uint16_t modules = version * 4 + 17;
   constexpr uint16_t bufSize = (modules * modules + 7) / 8;
@@ -189,13 +196,10 @@ void drawWifiQr(const char *ssid, const char *password, const char *url) {
   QRCode qr;
   uint8_t qrData[bufSize];
   if (qrcode_initText(&qr, qrData, version, ECC_MEDIUM, payload.c_str()) < 0) {
-    drawMessage("Upload photos", "Join the Wi-Fi network below", url);
+    drawMessage(fallbackTitle, fallbackLine, "");
     return;
   }
 
-  // Landscape layout: QR on the left, the details beside it. Stacking these
-  // vertically does not fit — 41 modules at a comfortable scale plus two lines
-  // of text is taller than 480 px.
   const int16_t cardH = 360;
   const int16_t cardW = 640;
   const int16_t cardX = (SCREEN_W - cardW) / 2;
@@ -203,12 +207,11 @@ void drawWifiQr(const char *ssid, const char *password, const char *url) {
   const int16_t pad = 22;
 
   // Derive the module scale from the height actually available rather than
-  // hardcoding it, so the card can never overflow the panel. The +8 covers the
-  // 4 modules of quiet zone the QR spec requires on each side.
-  const int16_t avail = cardH - pad * 2;
-  const int16_t scale = avail / (qr.size + 8);
-  if (scale < 2) {  // no sane way to draw it — say something useful instead
-    drawMessage("Upload photos", ssid, url);
+  // hardcoding it, so the card can never overflow the panel again. The +8 covers
+  // the 4 modules of quiet zone the QR spec requires on each side.
+  const int16_t scale = (cardH - pad * 2) / (qr.size + 8);
+  if (scale < 2) {
+    drawMessage(fallbackTitle, fallbackLine, "");
     return;
   }
 
@@ -231,28 +234,57 @@ void drawWifiQr(const char *ssid, const char *password, const char *url) {
     }
   }
 
-  // Details column. The password is spelled out as well as encoded, so a phone
-  // that will not scan can still be joined by hand.
-  // The stack below is 220 px tall; start it so the column sits centred in the
-  // card rather than riding high with dead space underneath.
-  const int16_t tx = blockX + block + 28;
-  int16_t ty = cardY + 70;
+  // Centre the column vertically rather than letting it ride high with dead
+  // space underneath.
+  int16_t stackH = 0;
+  for (uint8_t i = 0; i < rowCount; i++) {
+    stackH += (int16_t)(8 * rows[i].size) + rows[i].gapAfter;
+  }
 
-  drawLeft("Add photos", tx, ty, 3, TEXT_PRIMARY);
-  ty += 52;
-  drawLeft("NETWORK", tx, ty, 1, TEXT_MUTED);
-  ty += 14;
-  drawLeft(ssid, tx, ty, 2, ACCENT);
-  ty += 40;
-  drawLeft("PASSWORD", tx, ty, 1, TEXT_MUTED);
-  ty += 14;
-  drawLeft(password, tx, ty, 2, ACCENT);
-  ty += 40;
-  drawLeft("THEN OPEN", tx, ty, 1, TEXT_MUTED);
-  ty += 14;
-  drawLeft(url, tx, ty, 2, TEXT_PRIMARY);
-  ty += 38;
-  drawLeft("scan to join automatically", tx, ty, 1, TEXT_MUTED);
+  const int16_t tx = blockX + block + 28;
+  int16_t ty = cardY + (cardH - stackH) / 2;
+  for (uint8_t i = 0; i < rowCount; i++) {
+    if (rows[i].text && rows[i].text[0]) {
+      drawLeft(rows[i].text, tx, ty, rows[i].size, rows[i].color);
+    }
+    ty += (int16_t)(8 * rows[i].size) + rows[i].gapAfter;
+  }
+}
+
+void drawWifiQr(const char *ssid, const char *password, const char *url) {
+  // Standard Wi-Fi provisioning payload: scanning it joins the network, and the
+  // captive portal then opens the page by itself.
+  String payload = "WIFI:T:WPA;S:" + escapeWifiField(ssid) + ";P:" +
+                   escapeWifiField(password) + ";;";
+
+  // The password is spelled out as well as encoded, so a phone that will not
+  // scan can still be joined by hand.
+  const QrRow rows[] = {
+      {"Add photos", 3, TEXT_PRIMARY, 28},
+      {"NETWORK", 1, TEXT_MUTED, 6},
+      {ssid, 2, ACCENT, 24},
+      {"PASSWORD", 1, TEXT_MUTED, 6},
+      {password, 2, ACCENT, 24},
+      {"THEN OPEN", 1, TEXT_MUTED, 6},
+      {url, 2, TEXT_PRIMARY, 22},
+      {"scan to join automatically", 1, TEXT_MUTED, 0},
+  };
+  drawQrCard(payload, rows, sizeof(rows) / sizeof(rows[0]), "Add photos", ssid);
+}
+
+void drawUrlQr(const char *url, const char *network, const char *alsoAt) {
+  // Already on her network, so the phone is too — the code is just the address.
+  const QrRow rows[] = {
+      {"Add photos", 3, TEXT_PRIMARY, 30},
+      {"SCAN, OR VISIT", 1, TEXT_MUTED, 6},
+      {url, 2, ACCENT, 24},
+      {"ALSO AT", 1, TEXT_MUTED, 6},
+      {alsoAt, 2, TEXT_PRIMARY, 26},
+      {"ON", 1, TEXT_MUTED, 6},
+      {network, 2, TEXT_MUTED, 0},
+  };
+  drawQrCard(String(url), rows, sizeof(rows) / sizeof(rows[0]), "Add photos",
+             url);
 }
 
 void drawIntervalMenu(const char *label, uint8_t index, uint8_t count) {
@@ -295,6 +327,56 @@ void drawMessage(const char *title, const char *line1, const char *line2) {
   }
   if (line2 && *line2) {
     drawCentered(line2, SCREEN_W / 2, cardY + 112, 2, ACCENT);
+  }
+}
+
+void drawNote(const char *from, const char *text) {
+  const int16_t cardW = 600;
+  const int16_t cardX = (SCREEN_W - cardW) / 2;
+  const int16_t pad = 28;
+  const uint8_t size = 3;
+  const int16_t charW = 6 * size;
+  const int16_t lineH = 8 * size + 8;
+  const int16_t maxChars = (cardW - pad * 2) / charW;
+
+  // Wrap on whitespace, breaking mid-word only when a single word is longer
+  // than the card is wide.
+  String lines[NOTE_MAX_LINES];
+  uint8_t count = 0;
+  String rest = text;
+  rest.trim();
+
+  while (rest.length() > 0 && count < NOTE_MAX_LINES) {
+    if ((int16_t)rest.length() <= maxChars) {
+      lines[count++] = rest;
+      break;
+    }
+    int cut = -1;
+    for (int16_t i = maxChars; i > 0; i--) {
+      if (rest[i] == ' ') {
+        cut = i;
+        break;
+      }
+    }
+    if (cut <= 0) cut = maxChars;  // one very long word
+    lines[count++] = rest.substring(0, cut);
+    rest = rest.substring(cut);
+    rest.trim();
+  }
+
+  const int16_t textH = count * lineH;
+  const int16_t cardH = pad * 2 + 34 + textH;
+  const int16_t cardY = (SCREEN_H - cardH) / 2;
+
+  drawCard(cardX, cardY, cardW, cardH);
+
+  String heading = String("From ") + from;
+  drawCentered(heading.c_str(), SCREEN_W / 2, cardY + pad, 2, ACCENT);
+
+  int16_t y = cardY + pad + 34;
+  for (uint8_t i = 0; i < count; i++) {
+    drawCentered(lines[i].c_str(), SCREEN_W / 2, y, size, TEXT_PRIMARY);
+    y += lineH;
   }
 }
 

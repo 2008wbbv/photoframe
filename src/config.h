@@ -147,15 +147,85 @@ static const char *const PATH_CONFIG = "/config.txt";
 static const uint16_t MAX_PHOTOS = 500;
 
 // ---------------------------------------------------------------------------
-// Wi-Fi access point
+// Wi-Fi
 // ---------------------------------------------------------------------------
+//
+// The frame prefers to join her home network, because that is the only way it
+// can reach the internet and pick up photos sent from elsewhere. It only hosts
+// its own access point when it has no stored credentials or cannot get on, and
+// then serves the setup page so she can enter them herself. Her password is
+// typed on her own phone and stored in NVS — it never goes in a source file.
 
+// The setup access point, used only when the frame is not on her network.
 static const char *const AP_SSID = "Rachel's Frame";
-// WPA2 needs at least 8 characters. Change this if you like — the QR code on
-// screen carries it, so nobody ever has to type it.
+// WPA2 needs at least 8 characters. The QR code on screen carries it, so nobody
+// ever has to type it.
 static const char *const AP_PASSWORD = "photoframe";
 static const uint8_t AP_CHANNEL = 6;
 static const uint8_t AP_MAX_CLIENTS = 4;
+
+// Advertised over mDNS, so the frame is reachable at photoframe.local without
+// caring what address her router handed out.
+static const char *const MDNS_HOSTNAME = "photoframe";
+
+// NVS namespace holding the stored network credentials.
+static const char *const NVS_NAMESPACE = "frame";
+
+static const uint32_t WIFI_CONNECT_TIMEOUT_MS = 20UL * 1000;
+static const uint32_t WIFI_CHECK_INTERVAL_MS = 5UL * 1000;
+// How long the network may stay away before we give up and reopen the portal.
+// Generous on purpose: a router rebooting should not dump her out of Station
+// mode and make the frame look broken.
+static const uint32_t WIFI_GIVE_UP_MS = 5UL * 60 * 1000;
+static const uint8_t WIFI_SCAN_MAX_RESULTS = 20;
+
+// ---------------------------------------------------------------------------
+// Telegram — sending photos and notes to the frame from anywhere
+// ---------------------------------------------------------------------------
+//
+// Nothing gets installed on the ESP32 for this. Telegram has a plain HTTPS REST
+// API, so the frame is only making web requests to api.telegram.org. Setup:
+//
+//   1. Message @BotFather on Telegram and send /newbot.
+//   2. Paste the token it gives you below.
+//   3. Flash, then message your own bot. The serial console prints the chat id
+//      of whoever talks to it — put that id in the allowlist below and reflash.
+//
+// Leave the token empty to disable all of this; the frame works exactly as it
+// did before, just without remote sending.
+static const char *const TELEGRAM_BOT_TOKEN = "";
+
+// ONLY these chat ids may send to the frame. This is not optional hardening: a
+// bot token sitting inside a device you have given away is effectively public,
+// and without an allowlist anyone who found the bot could put anything at all on
+// someone's picture frame. Add your own id, and any family you want to let in.
+static const int64_t TELEGRAM_ALLOWED_CHAT_IDS[] = {
+    0,  // replace with your chat id, e.g. 123456789
+};
+static const size_t TELEGRAM_ALLOWED_COUNT =
+    sizeof(TELEGRAM_ALLOWED_CHAT_IDS) / sizeof(TELEGRAM_ALLOWED_CHAT_IDS[0]);
+
+// How often to ask whether anything new has arrived. This is a short poll rather
+// than a 30-second long poll on purpose: the main loop is single-threaded, and
+// parking it inside an HTTPS read would freeze the slideshow, the buttons and
+// the touchscreen for the duration.
+static const uint32_t TELEGRAM_POLL_INTERVAL_MS = 5UL * 1000;
+static const uint32_t TELEGRAM_HTTP_TIMEOUT_MS = 8UL * 1000;
+
+// Telegram offers each photo at several resolutions. Anything wider than this is
+// skipped in favour of a smaller copy — the panel is only 800 px across, and a
+// 4 MP original would be a slow download and a slow decode for no visible gain.
+static const uint32_t TELEGRAM_MAX_PHOTO_WIDTH = 1600;
+static const uint32_t TELEGRAM_MAX_PHOTO_BYTES = 1024UL * 1024;
+
+static const uint16_t TELEGRAM_MAX_MESSAGE_CHARS = 180;
+
+// Wrapped lines a note may occupy before it is truncated. Six lines of size-3
+// text is about as much as reads comfortably from across a room.
+static const uint8_t NOTE_MAX_LINES = 6;
+
+// How long a note stays on screen before the slideshow resumes.
+static const uint32_t MESSAGE_DISPLAY_MS = 30UL * 1000;
 
 // ---------------------------------------------------------------------------
 // Slideshow

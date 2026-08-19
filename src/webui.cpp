@@ -10,6 +10,7 @@
 #include "playlist.h"
 #include "storage.h"
 #include "web_page.h"
+#include "wifimgr.h"
 
 namespace webui {
 namespace {
@@ -18,8 +19,9 @@ WebServer g_server(80);
 DNSServer g_dns;
 Hooks g_hooks;
 
-IPAddress g_apIp(192, 168, 4, 1);
-char g_url[32] = "http://192.168.4.1";
+// The radio belongs to wifimgr; this module only serves HTTP, plus DNS when we
+// are the network and need the captive portal to fire.
+bool g_dnsRunning = false;
 
 // Upload state. Only one upload is ever in flight — the server is synchronous.
 File g_file;
@@ -113,6 +115,10 @@ void routeStatus() {
   json += ",\"brightness\":" + String(display::brightness());
   json += ",\"panel_on\":" + String(display::panelOn() ? "true" : "false");
   json += ",\"lux\":" + String(lux, 1);
+  json += ",\"portal\":" +
+          String(wifimgr::mode() == wifimgr::Mode::Portal ? "true" : "false");
+  json += ",\"network\":\"" + jsonEscape(wifimgr::ssid()) + "\"";
+  json += ",\"online\":" + String(wifimgr::online() ? "true" : "false");
   json += ",\"used_mb\":" + String((uint32_t)(storage::cardUsedBytes() / 1048576));
   json += ",\"total_mb\":" + String((uint32_t)(storage::cardSizeBytes() / 1048576));
   json += "}";
@@ -205,10 +211,40 @@ void routePrev() {
   g_server.send(200, "text/plain", "ok");
 }
 
+void routeScan() {
+  g_server.send(200, "application/json", wifimgr::scanJson());
+}
+
+void routeJoin() {
+  String ssid = g_server.arg("ssid");
+  String password = g_server.arg("password");
+
+  if (!wifimgr::saveCredentials(ssid, password)) {
+    g_server.send(400, "text/plain", "bad credentials");
+    return;
+  }
+
+  // Answer before restarting, so the phone sees the confirmation rather than a
+  // dropped connection. Joining a new network means tearing down this AP, and
+  // rebooting is far more predictable than reconfiguring the radio underneath a
+  // live HTTP response.
+  g_server.send(200, "text/plain", "ok");
+  delay(400);
+  Serial.println("[wifi] credentials saved, restarting to join");
+  ESP.restart();
+}
+
+void routeForget() {
+  wifimgr::forgetCredentials();
+  g_server.send(200, "text/plain", "ok");
+  delay(400);
+  ESP.restart();
+}
+
 // Anything we do not recognise gets bounced to the root. This is what makes the
 // captive-portal sheet pop open by itself once the phone joins.
 void routeNotFound() {
-  g_server.sendHeader("Location", String(g_url) + "/", true);
+  g_server.sendHeader("Location", String(wifimgr::url()) + "/", true);
   g_server.send(302, "text/plain", "");
 }
 
@@ -216,23 +252,6 @@ void routeNotFound() {
 
 bool begin(const Hooks &hooks) {
   g_hooks = hooks;
-
-  WiFi.mode(WIFI_AP);
-  WiFi.softAPConfig(g_apIp, g_apIp, IPAddress(255, 255, 255, 0));
-  bool ok = WiFi.softAP(AP_SSID, AP_PASSWORD, AP_CHANNEL, /* hidden */ false,
-                        AP_MAX_CLIENTS);
-  if (!ok) {
-    Serial.println("[wifi] could not start the access point");
-    return false;
-  }
-  WiFi.setSleep(false);
-
-  g_apIp = WiFi.softAPIP();
-  snprintf(g_url, sizeof(g_url), "http://%s", g_apIp.toString().c_str());
-
-  // Resolve every hostname to us, so captive-portal detection triggers.
-  g_dns.setErrorReplyCode(DNSReplyCode::NoError);
-  g_dns.start(53, "*", g_apIp);
 
   g_server.on("/", HTTP_GET, routeIndex);
   g_server.on("/api/status", HTTP_GET, routeStatus);
@@ -244,6 +263,9 @@ bool begin(const Hooks &hooks) {
   g_server.on("/api/interval", HTTP_POST, routeInterval);
   g_server.on("/api/next", HTTP_POST, routeNext);
   g_server.on("/api/prev", HTTP_POST, routePrev);
+  g_server.on("/api/scan", HTTP_GET, routeScan);
+  g_server.on("/api/join", HTTP_POST, routeJoin);
+  g_server.on("/api/forget", HTTP_POST, routeForget);
 
   g_server.on(
       "/api/upload", HTTP_POST, []() { finishUpload(true); },
@@ -255,17 +277,38 @@ bool begin(const Hooks &hooks) {
   g_server.onNotFound(routeNotFound);
   g_server.begin();
 
-  Serial.printf("[wifi] \"%s\" up at %s\n", AP_SSID, g_url);
+  // Resolving every hostname to us is what makes the captive-portal sheet open
+  // by itself. Only meaningful while we are the network — on her Wi-Fi it would
+  // be hijacking DNS for every device in the house.
+  if (wifimgr::mode() == wifimgr::Mode::Portal) {
+    g_dns.setErrorReplyCode(DNSReplyCode::NoError);
+    g_dns.start(53, "*", wifimgr::ip());
+    g_dnsRunning = true;
+  }
+
+  Serial.printf("[http] serving at %s\n", wifimgr::url());
   return true;
 }
 
 void loop() {
-  g_dns.processNextRequest();
+  bool portal = (wifimgr::mode() == wifimgr::Mode::Portal);
+
+  // wifimgr can drop us into portal mode long after boot, so pick DNS up then.
+  if (portal && !g_dnsRunning) {
+    g_dns.setErrorReplyCode(DNSReplyCode::NoError);
+    g_dns.start(53, "*", wifimgr::ip());
+    g_dnsRunning = true;
+  } else if (!portal && g_dnsRunning) {
+    g_dns.stop();
+    g_dnsRunning = false;
+  }
+
+  if (g_dnsRunning) g_dns.processNextRequest();
   g_server.handleClient();
 }
 
-IPAddress ip() { return g_apIp; }
+IPAddress ip() { return wifimgr::ip(); }
 
-const char *url() { return g_url; }
+const char *url() { return wifimgr::url(); }
 
 }  // namespace webui

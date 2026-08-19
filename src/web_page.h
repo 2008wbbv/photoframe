@@ -66,11 +66,30 @@ static const char INDEX_HTML[] PROGMEM = R"PAGE(
     display:none;flex-direction:column;align-items:center;justify-content:center;gap:16px}
   .lb.open{display:flex}
   .lb img{max-width:100%;max-height:56vh;border-radius:10px;background:#000}
+  select,input[type=password]{font:inherit;padding:11px;border-radius:10px;
+    border:1px solid var(--line);background:#141211;color:var(--text)}
+  #wifi-log{font-size:13px;color:var(--muted);min-height:20px;margin-top:10px}
 </style>
 
 <div class="wrap">
   <h1>Rachel's Frame</h1>
   <p class="sub">Add photos, and they'll start showing up in the shuffle.</p>
+
+  <div class="card" id="wifi-card" hidden>
+    <h2>Connect to Wi-Fi</h2>
+    <p class="empty" style="margin:0 0 12px">
+      The frame is running its own network right now. Put it on your Wi-Fi so it
+      can receive photos sent from away.
+    </p>
+    <select id="wifi-ssid" style="width:100%;margin-bottom:8px"></select>
+    <input type="password" id="wifi-pass" placeholder="Wi-Fi password"
+           autocomplete="off" style="width:100%;margin-bottom:10px">
+    <div class="row">
+      <button onclick="join()">Connect</button>
+      <button class="ghost" onclick="scan()">Rescan</button>
+    </div>
+    <div id="wifi-log"></div>
+  </div>
 
   <div class="card">
     <h2>Add photos</h2>
@@ -94,6 +113,7 @@ static const char INDEX_HTML[] PROGMEM = R"PAGE(
       <button class="ghost" onclick="nav('next')">Next &rarr;</button>
     </div>
     <div style="margin-top:12px">
+      <div class="stat"><span>Network</span><b id="s-net">–</b></div>
       <div class="stat"><span>Ambient light</span><b id="s-lux">–</b></div>
       <div class="stat"><span>Brightness</span><b id="s-bright">–</b></div>
       <div class="stat"><span>Card used</span><b id="s-card">–</b></div>
@@ -276,6 +296,46 @@ function drawGrid(names){
   }
 }
 
+// ---- wi-fi setup ---------------------------------------------------------
+
+const wlog = m => document.getElementById('wifi-log').textContent = m;
+
+async function scan(){
+  wlog('Scanning…');
+  try {
+    const nets = await (await fetch('/api/scan')).json();
+    const sel = document.getElementById('wifi-ssid');
+    sel.innerHTML = '';
+    if (!nets.length){ wlog('No networks found. Try again.'); return; }
+    for (const n of nets){
+      const o = document.createElement('option');
+      o.value = n.ssid;
+      o.textContent = n.ssid + '  (' + n.rssi + ' dBm)' + (n.open ? ' — open' : '');
+      sel.appendChild(o);
+    }
+    wlog(nets.length + ' network' + (nets.length > 1 ? 's' : '') + ' found.');
+  } catch (e) { wlog('Scan failed.'); }
+}
+
+async function join(){
+  const ssid = document.getElementById('wifi-ssid').value;
+  const pass = document.getElementById('wifi-pass').value;
+  if (!ssid){ wlog('Pick a network first.'); return; }
+
+  wlog('Connecting…');
+  try {
+    const body = new URLSearchParams({ ssid, password: pass });
+    const r = await fetch('/api/join', { method:'POST', body });
+    if (!r.ok) throw new Error();
+    // The frame reboots to join, which drops this network out from under us.
+    wlog('Saved. The frame is restarting to join "' + ssid + '" — this page '
+       + 'will stop responding. Reconnect your phone to your normal Wi-Fi, then '
+       + 'hold the right button on the frame for its new address.');
+  } catch (e) {
+    wlog('Could not save those details.');
+  }
+}
+
 // ---- controls + status ---------------------------------------------------
 
 async function nav(dir){ await fetch('/api/'+dir, {method:'POST'}); refresh(); }
@@ -301,6 +361,16 @@ async function refresh(){
   try {
     const s = await (await fetch('/api/status')).json();
     current = s.current || '';
+
+    const card = document.getElementById('wifi-card');
+    if (s.portal && card.hidden){
+      card.hidden = false;
+      scan();                 // populate the picker the first time only
+    } else if (!s.portal) {
+      card.hidden = true;
+    }
+    document.getElementById('s-net').textContent =
+      s.portal ? 'own network' : (s.network || '–') + (s.online ? '' : ' (offline)');
     document.getElementById('s-count').textContent =
       s.count === 1 ? '1 photo' : s.count + ' photos';
     document.getElementById('s-lux').textContent =

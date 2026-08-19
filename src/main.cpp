@@ -25,12 +25,14 @@
 #include "photos.h"
 #include "playlist.h"
 #include "storage.h"
+#include "telegram.h"
 #include "touch.h"
 #include "webui.h"
+#include "wifimgr.h"
 
 namespace {
 
-enum class State : uint8_t { Slideshow, QrOverlay, IntervalMenu };
+enum class State : uint8_t { Slideshow, QrOverlay, IntervalMenu, Note };
 
 State g_state = State::Slideshow;
 uint32_t g_stateEnteredAt = 0;
@@ -67,6 +69,20 @@ const char *intervalLabel(uint8_t index) {
 
 float currentLux() { return g_lux; }
 
+// Which "add photos" card to show depends on the network. On her Wi-Fi the phone
+// is already on the same network, so the QR is just the address and scanning it
+// opens the page — no switching networks. In portal mode the QR has to join the
+// phone to us first.
+void drawAddPhotosCard() {
+  if (wifimgr::mode() == wifimgr::Mode::Station) {
+    static char alsoAt[48];
+    snprintf(alsoAt, sizeof(alsoAt), "http://%s.local", wifimgr::hostname());
+    display::drawUrlQr(wifimgr::url(), wifimgr::ssid().c_str(), alsoAt);
+  } else {
+    display::drawWifiQr(AP_SSID, AP_PASSWORD, wifimgr::url());
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Overlays
 // ---------------------------------------------------------------------------
@@ -76,13 +92,17 @@ float currentLux() { return g_lux; }
 void drawOverlay() {
   switch (g_state) {
     case State::QrOverlay:
-      display::drawWifiQr(AP_SSID, AP_PASSWORD, webui::url());
+      drawAddPhotosCard();
       return;
     case State::IntervalMenu: {
       uint8_t i = storage::settings().intervalIndex;
       display::drawIntervalMenu(intervalLabel(i), i, INTERVAL_OPTION_COUNT);
       return;
     }
+    case State::Note:
+      display::drawNote(telegram::lastSender().c_str(),
+                        telegram::lastMessage().c_str());
+      return;
     case State::Slideshow:
       break;
   }
@@ -90,11 +110,11 @@ void drawOverlay() {
   switch (g_message) {
     case Message::NoPhotos:
       // Nothing to show yet, so lead with the way to fix that.
-      display::drawWifiQr(AP_SSID, AP_PASSWORD, webui::url());
+      drawAddPhotosCard();
       break;
     case Message::Unreadable:
       display::drawMessage("Can't read those photos", "Try re-uploading them",
-                           webui::url());
+                           wifimgr::url());
       break;
     case Message::None:
       break;
@@ -304,7 +324,8 @@ void handleButton(buttons::Event e) {
       break;
 
     case State::QrOverlay:
-      // Any press dismisses it.
+    case State::Note:
+      // Any press dismisses either card.
       enterState(State::Slideshow);
       break;
 
@@ -377,6 +398,8 @@ void setup() {
 
   playlist::rescan();
 
+  wifimgr::begin();
+
   webui::Hooks hooks;
   hooks.onNext = goNext;
   hooks.onPrev = goPrev;
@@ -384,6 +407,7 @@ void setup() {
   hooks.onShow = goShow;
   hooks.getLux = currentLux;
   webui::begin(hooks);
+  telegram::begin();
 
   Serial.printf("[boot] ready — %u photos, %s per photo\n", playlist::count(),
                 intervalLabel(storage::settings().intervalIndex));
@@ -394,6 +418,7 @@ void setup() {
 }
 
 void loop() {
+  wifimgr::loop();
   webui::loop();
 
   // Buttons and touch speak the same event vocabulary, so the state machine
@@ -402,6 +427,20 @@ void loop() {
   handleButton(touch::poll());
 
   updateDimming();
+
+  // Telegram makes a blocking HTTPS request, so only reach for it while nothing
+  // is on screen that a stall would spoil.
+  if (g_state == State::Slideshow) {
+    if (telegram::poll()) onPhotosChanged();
+
+    if (telegram::messagePending()) {
+      telegram::clearMessage();
+      // A note is worth waking the panel for, even at night.
+      g_wakeUntil = millis() + NIGHT_WAKE_MS;
+      display::setPanelOn(true);
+      enterState(State::Note);
+    }
+  }
 
   uint32_t now = millis();
 
@@ -417,6 +456,12 @@ void loop() {
 
     case State::QrOverlay:
       if (now - g_stateEnteredAt >= QR_OVERLAY_TIMEOUT_MS) {
+        enterState(State::Slideshow);
+      }
+      break;
+
+    case State::Note:
+      if (now - g_stateEnteredAt >= MESSAGE_DISPLAY_MS) {
         enterState(State::Slideshow);
       }
       break;
