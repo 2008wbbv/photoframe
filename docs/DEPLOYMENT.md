@@ -209,7 +209,9 @@ Then check each thing by hand:
 | Cup your hand over the sensor | Picture dims within a second or two |
 | Cover it completely | Panel blanks; a button press wakes it |
 | Scan the QR with a phone | Joins the network, upload page opens by itself |
-| Upload a photo | Appears in the gallery, and in the shuffle |
+| Upload a photo | Crop editor opens; drag and pinch, then Use this |
+| Upload several at once | Crops one at a time; Centre the rest skips the queue |
+| Upload a sideways photo | Rotate squares it up |
 | Tap a gallery photo → Remove | Twice to confirm; it disappears |
 | Tap the left / right half of the screen | Same as the matching button |
 | Press and hold the right half | QR code appears, fully on screen and uncropped |

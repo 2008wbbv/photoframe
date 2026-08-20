@@ -64,8 +64,8 @@ and photos live on the SD card.
 
 The first build pulls a few hundred MB of toolchain, so give it a few minutes.
 
-Verified building clean against Arduino core 3.3.9: **flash 1.36 MB of 6.55 MB
-(20.7%), RAM 87 KB of 320 KB (26.7%)**, with the two 750 KB image buffers coming
+Verified building clean against Arduino core 3.3.9: **flash 1.37 MB of 6.55 MB
+(20.9%), RAM 87 KB of 320 KB (26.7%)**, with the two 750 KB image buffers coming
 out of PSRAM on top of that.
 
 ### A note on the platform line
@@ -102,9 +102,18 @@ a Wi-Fi join payload instead and the captive portal opens the page by itself; th
 password is printed beside the code as well as baked into it, so nobody has to
 type anything either way.
 
-The browser does the image work. Each photo is cover-cropped and resized to
-exactly 800×480 and re-encoded as JPEG before it is sent, along with a small
-thumbnail for the management grid. Two useful consequences:
+The browser does the image work, and each photo gets a crop pass on the way in.
+A 5:3 frame sits over the picture with rule-of-thirds guides; drag to move,
+pinch or use the slider to zoom, and Rotate fixes anything that came in sideways.
+Whatever is inside the frame is what the panel shows.
+
+Auto-centring alone is a bad default — it decapitates anyone standing off to one
+side — but cropping twenty holiday photos one at a time is worse, so **Centre the
+rest** takes the remainder automatically and **Skip this one** drops a photo
+without uploading it.
+
+The result is resized to exactly 800×480 and re-encoded as JPEG, along with a
+small thumbnail for the gallery. Two useful consequences:
 
 - **iPhone HEIC files just work.** Safari decodes them into a canvas; the frame
   never sees a format it cannot handle.
@@ -260,7 +269,7 @@ src/
   ch422g.cpp     I/O expander: backlight, LCD reset, SD chip-select
   storage.cpp    SD mount, settings, filename hygiene
   webui.cpp      access point, captive portal, upload endpoints
-  web_page.h     the upload page and gallery
+  web_page.h     the upload page, crop editor and gallery
 docs/
   WIRING.md      connector map, the BH1750 address trap, button ladder
   DEPLOYMENT.md  card prep, flashing, bench test, mounting, handover
@@ -289,7 +298,8 @@ so re-dimming is a re-blit and never a re-decode.
 | Night mode never blanks | `EXIO2` vs `EXIO3` differ across board revisions; swap `EXIO_DISP` and `EXIO_LCD_RST` in `ch422g.h`. |
 | Photos advance by themselves; menus open unprompted | GPIO6 is floating. The button ladder's 10k pull-up is missing. |
 | Both buttons do the same thing | The right button's 10k series resistor is missing or bridged. |
-| Photos letterboxed with black bars | Added by hand to the card, or sent via Telegram — neither path crops to 800×480 the way a web upload does. |
+| Photos letterboxed with black bars | Added by hand to the card, or sent via Telegram — neither path goes through the crop editor. Re-upload through the page to fix the framing. |
+| Want to re-crop a photo already on the frame | Not possible — only the cropped 800×480 version is kept, not the original. Upload it again. |
 | Telegram messages ignored | Your chat id is not allowed yet. Reload the web page — it offers to allow whoever last messaged. |
 | Dimming feels wrong for the room | Recalibrate from the web page. The defaults are generic indoor guesses. |
 | Frame stuck hosting its own network | It could not join the stored network. Connect to `Rachel's Frame` and the setup card will be waiting on the page. |

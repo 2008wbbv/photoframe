@@ -69,6 +69,30 @@ static const char INDEX_HTML[] PROGMEM = R"PAGE(
   select,input[type=password]{font:inherit;padding:11px;border-radius:10px;
     border:1px solid var(--line);background:#141211;color:var(--text)}
   #wifi-log{font-size:13px;color:var(--muted);min-height:20px;margin-top:10px}
+  /* Crop editor */
+  .crop{position:fixed;inset:0;z-index:20;background:#0b0908;padding:16px;
+    display:none;flex-direction:column;justify-content:center;gap:14px}
+  .crop.open{display:flex}
+  .crop h3{margin:0;font-size:15px;font-weight:600;text-align:center}
+  .crop .hint{margin:0;text-align:center;color:var(--muted);font-size:13px}
+  #crop-box{position:relative;width:100%;max-width:520px;margin:0 auto;
+    aspect-ratio:5/3;overflow:hidden;border-radius:10px;background:#000;
+    touch-action:none;cursor:grab}
+  #crop-box canvas{position:absolute;top:0;left:0;transform-origin:0 0;
+    will-change:transform}
+  /* Rule-of-thirds guides, so it is obvious this is a crop frame */
+  #crop-box::after{content:"";position:absolute;inset:0;pointer-events:none;
+    background:
+      linear-gradient(to right,transparent 33.2%,rgba(255,255,255,.28) 33.2%,
+        rgba(255,255,255,.28) 33.5%,transparent 33.5%,transparent 66.4%,
+        rgba(255,255,255,.28) 66.4%,rgba(255,255,255,.28) 66.7%,transparent 66.7%),
+      linear-gradient(to bottom,transparent 33.2%,rgba(255,255,255,.28) 33.2%,
+        rgba(255,255,255,.28) 33.5%,transparent 33.5%,transparent 66.4%,
+        rgba(255,255,255,.28) 66.4%,rgba(255,255,255,.28) 66.7%,transparent 66.7%);
+    box-shadow:inset 0 0 0 2px var(--accent)}
+  input[type=range]{width:100%;max-width:520px;margin:0 auto;accent-color:var(--accent)}
+  .crop .row{max-width:520px;margin:0 auto;width:100%}
+  .crop .row button{flex:1}
 </style>
 
 <div class="wrap">
@@ -153,6 +177,22 @@ static const char INDEX_HTML[] PROGMEM = R"PAGE(
   </div>
 </div>
 
+<div class="crop" id="crop">
+  <h3 id="crop-title">Crop to fit</h3>
+  <p class="hint">Drag to move &middot; pinch or use the slider to zoom</p>
+  <div id="crop-box"><canvas id="crop-canvas"></canvas></div>
+  <input type="range" id="crop-zoom" min="100" max="400" value="100">
+  <div class="row">
+    <button onclick="cropUse()">Use this</button>
+    <button class="ghost" onclick="cropRotate()">Rotate</button>
+    <button class="ghost" onclick="cropReset()">Centre</button>
+  </div>
+  <div class="row">
+    <button class="ghost" onclick="cropSkip()">Skip this one</button>
+    <button class="ghost" onclick="cropRest()">Centre the rest</button>
+  </div>
+</div>
+
 <div class="lb" id="lb">
   <img id="lb-img" alt="">
   <div class="row">
@@ -168,39 +208,243 @@ const log = m => document.getElementById('log').textContent = m;
 const enc = encodeURIComponent;
 let current = '';
 
-// ---- upload ---------------------------------------------------------------
+// ---- upload, with a crop step ---------------------------------------------
+//
+// Photos are cropped here rather than on the frame, because the browser already
+// has a decoder, a scaler and a touchscreen, and the ESP32 has none of those to
+// spare. Auto-centring is a poor default on its own — it decapitates anyone
+// standing off-centre — so each photo gets a pan-and-zoom pass first, with an
+// escape hatch for when there are twenty of them.
 
 const drop = document.getElementById('drop');
 const pick = document.getElementById('pick');
 drop.onclick = () => pick.click();
-pick.onchange = () => { send([...pick.files]); pick.value = ''; };
+pick.onchange = () => { start([...pick.files]); pick.value = ''; };
 drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
 drop.ondragleave = () => drop.classList.remove('over');
 drop.ondrop = e => {
   e.preventDefault(); drop.classList.remove('over');
-  send([...e.dataTransfer.files].filter(f => f.type.startsWith('image/')));
+  start([...e.dataTransfer.files].filter(f => f.type.startsWith('image/')));
 };
 
-// Cover-crop to exactly 800x480 and make a thumbnail, all client side.
-async function prepare(file){
-  const bmp = await createImageBitmap(file);
-  const want = 800/480, have = bmp.width/bmp.height;
+const WANT = 800 / 480;
+const cropOv = document.getElementById('crop');
+const cropBox = document.getElementById('crop-box');
+const cropCanvas = document.getElementById('crop-canvas');
+const cropZoom = document.getElementById('crop-zoom');
+const cropTitle = document.getElementById('crop-title');
+
+let queue = [], qi = 0, ready = [], centreRest = false;
+let srcBmp = null, rotation = 0;
+const view = { scale: 1, base: 1, tx: 0, ty: 0, W: 0, H: 0 };
+
+// Downscale big originals before any of this. A 12 MP photo held as a canvas is
+// tens of megabytes, and the output is 800x480 — 2000 px on the long edge is
+// still far more detail than the panel can show.
+function toSource(bmp, deg){
+  const swap = (deg === 90 || deg === 270);
+  let w = swap ? bmp.height : bmp.width;
+  let h = swap ? bmp.width : bmp.height;
+
+  const cap = 2000, big = Math.max(w, h);
+  const k = big > cap ? cap / big : 1;
+  w = Math.round(w * k); h = Math.round(h * k);
+
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const g = c.getContext('2d');
+  g.translate(w / 2, h / 2);
+  if (deg) g.rotate(deg * Math.PI / 180);
+  const dw = (swap ? h : w), dh = (swap ? w : h);
+  g.drawImage(bmp, -dw / 2, -dh / 2, dw, dh);
+  return c;
+}
+
+function layout(reset){
+  view.W = cropBox.clientWidth;
+  view.H = cropBox.clientHeight;
+  // Smallest scale that still covers the frame, so there is never a bald patch.
+  view.base = Math.max(view.W / cropCanvas.width, view.H / cropCanvas.height);
+  if (reset){
+    view.scale = view.base;
+    cropZoom.value = 100;
+    view.tx = (view.W - cropCanvas.width * view.scale) / 2;
+    view.ty = (view.H - cropCanvas.height * view.scale) / 2;
+  }
+  apply();
+}
+
+function apply(){
+  const dw = cropCanvas.width * view.scale, dh = cropCanvas.height * view.scale;
+  view.tx = Math.min(0, Math.max(view.W - dw, view.tx));
+  view.ty = Math.min(0, Math.max(view.H - dh, view.ty));
+  if (dw <= view.W) view.tx = (view.W - dw) / 2;
+  if (dh <= view.H) view.ty = (view.H - dh) / 2;
+  cropCanvas.style.transform =
+    `translate(${view.tx}px, ${view.ty}px) scale(${view.scale})`;
+}
+
+// Zoom about a point, so pinching keeps the spot between your fingers put.
+function zoomTo(next, px, py){
+  next = Math.max(view.base, Math.min(view.base * 4, next));
+  const k = next / view.scale;
+  view.tx = px - (px - view.tx) * k;
+  view.ty = py - (py - view.ty) * k;
+  view.scale = next;
+  cropZoom.value = Math.round(view.scale / view.base * 100);
+  apply();
+}
+
+// Pointer Events cover mouse and touch with one path.
+const pts = new Map();
+let pinchStart = 0, pinchScale = 1;
+
+cropBox.addEventListener('pointerdown', e => {
+  cropBox.setPointerCapture(e.pointerId);
+  pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (pts.size === 2){
+    const [a, b] = [...pts.values()];
+    pinchStart = Math.hypot(a.x - b.x, a.y - b.y);
+    pinchScale = view.scale;
+  }
+});
+
+cropBox.addEventListener('pointermove', e => {
+  const prev = pts.get(e.pointerId);
+  if (!prev) return;
+  const now = { x: e.clientX, y: e.clientY };
+
+  if (pts.size === 1){
+    view.tx += now.x - prev.x;
+    view.ty += now.y - prev.y;
+    apply();
+  } else if (pts.size === 2){
+    pts.set(e.pointerId, now);
+    const [a, b] = [...pts.values()];
+    const dist = Math.hypot(a.x - b.x, a.y - b.y);
+    if (pinchStart > 0){
+      const r = cropBox.getBoundingClientRect();
+      zoomTo(pinchScale * (dist / pinchStart),
+             (a.x + b.x) / 2 - r.left, (a.y + b.y) / 2 - r.top);
+    }
+    return;
+  }
+  pts.set(e.pointerId, now);
+});
+
+const liftPointer = e => {
+  pts.delete(e.pointerId);
+  if (pts.size < 2) pinchStart = 0;
+};
+cropBox.addEventListener('pointerup', liftPointer);
+cropBox.addEventListener('pointercancel', liftPointer);
+
+cropZoom.oninput = () =>
+  zoomTo(view.base * (cropZoom.value / 100), view.W / 2, view.H / 2);
+
+// Renders whatever is inside the frame to the panel's exact resolution.
+function renderVisible(){
+  const c = document.createElement('canvas');
+  c.width = 800; c.height = 480;
+  c.getContext('2d').drawImage(
+    cropCanvas,
+    -view.tx / view.scale, -view.ty / view.scale,
+    view.W / view.scale, view.H / view.scale,
+    0, 0, 800, 480);
+  return c;
+}
+
+// The old behaviour, kept for "centre the rest" and for skipped photos.
+function renderCentred(src){
+  const have = src.width / src.height;
   let sw, sh, sx, sy;
-  if (have > want){ sh = bmp.height; sw = sh*want; sx = (bmp.width-sw)/2; sy = 0; }
-  else            { sw = bmp.width;  sh = sw/want; sx = 0; sy = (bmp.height-sh)/2; }
+  if (have > WANT){ sh = src.height; sw = sh * WANT; sx = (src.width - sw) / 2; sy = 0; }
+  else            { sw = src.width;  sh = sw / WANT; sx = 0; sy = (src.height - sh) / 2; }
 
   const c = document.createElement('canvas');
   c.width = 800; c.height = 480;
-  c.getContext('2d').drawImage(bmp, sx, sy, sw, sh, 0, 0, 800, 480);
-  const photo = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.88));
+  c.getContext('2d').drawImage(src, sx, sy, sw, sh, 0, 0, 800, 480);
+  return c;
+}
 
+async function encode(full){
+  const photo = await new Promise(r => full.toBlob(r, 'image/jpeg', 0.88));
   const t = document.createElement('canvas');
   t.width = 240; t.height = 144;
-  t.getContext('2d').drawImage(c, 0, 0, 240, 144);
+  t.getContext('2d').drawImage(full, 0, 0, 240, 144);
   const thumb = await new Promise(r => t.toBlob(r, 'image/jpeg', 0.7));
-
-  if (bmp.close) bmp.close();
   return { photo, thumb };
+}
+
+async function start(files){
+  if (!files.length) return;
+  queue = files; qi = 0; ready = []; centreRest = false;
+  next();
+}
+
+async function next(){
+  if (srcBmp){ if (srcBmp.close) srcBmp.close(); srcBmp = null; }
+
+  if (qi >= queue.length){
+    cropOv.classList.remove('open');
+    if (ready.length) await upload();
+    return;
+  }
+
+  log(`Preparing ${qi + 1} of ${queue.length}…`);
+  try {
+    // from-image honours EXIF orientation, which is why iPhone photos would
+    // otherwise land sideways.
+    srcBmp = await createImageBitmap(queue[qi], { imageOrientation: 'from-image' });
+  } catch (e) {
+    console.error(e);
+    qi++;
+    return next();
+  }
+
+  rotation = 0;
+  const src = toSource(srcBmp, 0);
+
+  if (centreRest){
+    ready.push(await encode(renderCentred(src)));
+    qi++;
+    return next();
+  }
+
+  cropCanvas.width = src.width;
+  cropCanvas.height = src.height;
+  cropCanvas.getContext('2d').drawImage(src, 0, 0);
+  cropTitle.textContent = queue.length > 1
+    ? `Crop to fit — ${qi + 1} of ${queue.length}` : 'Crop to fit';
+  cropOv.classList.add('open');
+  requestAnimationFrame(() => layout(true));
+  log('');
+}
+
+async function cropUse(){
+  ready.push(await encode(renderVisible()));
+  qi++;
+  next();
+}
+
+function cropSkip(){ qi++; next(); }
+
+async function cropRest(){
+  centreRest = true;
+  ready.push(await encode(renderCentred(cropCanvas)));
+  qi++;
+  next();
+}
+
+function cropReset(){ layout(true); }
+
+function cropRotate(){
+  rotation = (rotation + 90) % 360;
+  const src = toSource(srcBmp, rotation);
+  cropCanvas.width = src.width;
+  cropCanvas.height = src.height;
+  cropCanvas.getContext('2d').drawImage(src, 0, 0);
+  layout(true);
 }
 
 function newName(){
@@ -216,32 +460,31 @@ async function put(url, name, blob){
   if (!r.ok) throw new Error(await r.text());
 }
 
-async function send(files){
-  if (!files.length) return;
+async function upload(){
   const bar = document.getElementById('bar');
   const fill = bar.firstElementChild;
   bar.style.display = 'block';
   let done = 0, failed = 0;
 
-  for (const f of files){
-    log(`Uploading ${done+1} of ${files.length}…`);
+  for (const item of ready){
+    log(`Uploading ${done + 1} of ${ready.length}…`);
     try {
       const name = newName();
-      const { photo, thumb } = await prepare(f);
-      await put('/api/upload', name, photo);
-      await put('/api/thumbup', name, thumb);
+      await put('/api/upload', name, item.photo);
+      await put('/api/thumbup', name, item.thumb);
     } catch (e) {
       failed++;
-      console.error(f.name, e);
+      console.error(e);
     }
     done++;
-    fill.style.width = (done/files.length*100) + '%';
+    fill.style.width = (done / ready.length * 100) + '%';
   }
 
   bar.style.display = 'none';
   fill.style.width = '0';
-  log(failed ? `Added ${done-failed}, ${failed} failed.`
-            : `Added ${done} photo${done>1?'s':''}.`);
+  log(failed ? `Added ${done - failed}, ${failed} failed.`
+             : `Added ${done} photo${done > 1 ? 's' : ''}.`);
+  ready = [];
   refresh();
 }
 
