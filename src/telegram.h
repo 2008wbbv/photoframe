@@ -8,14 +8,17 @@
 //   file/...     downloads the actual JPEG bytes
 //   sendMessage  acknowledges back to the sender
 //
-// To set it up: message @BotFather on Telegram, send /newbot, and paste the
-// token it gives you into config.h. Then message your own bot once and watch the
-// serial console — it prints the chat id of anyone who talks to it, and only ids
-// on the allowlist are accepted.
+// To set it up: message @BotFather on Telegram, send /newbot, and paste the token
+// into the frame's setup page. Then message your own bot once — the page will
+// show your chat id and offer to allow it.
 //
-// The allowlist matters. A bot token is effectively public once it is on a device
-// you have given away, and without it anyone who found the bot could put whatever
-// they liked on the frame.
+// The token and allowlist live in NVS, not in config.h. A token compiled into a
+// source file ends up in git history the first time the repo is pushed and stays
+// there even if the line is later deleted; anyone who reads it controls the bot.
+//
+// The allowlist matters just as much. A token sitting inside a device you have
+// given away is effectively public, and without an allowlist anyone who found the
+// bot could put whatever they liked on the frame.
 
 #pragma once
 
@@ -43,6 +46,21 @@ uint32_t lastMessageAt();
 
 // Clears the pending message once it has been shown.
 void clearMessage();
+
+// --- setup, driven by the web page ---------------------------------------
+
+// Stores the bot token. Pass an empty string to disable Telegram entirely.
+// Returns false if the value does not look like a token at all.
+bool setToken(const String &token);
+
+bool hasAllowedSenders();
+uint8_t allowedCount();
+
+// The last sender that was turned away, so the page can offer to allow them
+// rather than making anyone read a serial console. Zero when there is none.
+int64_t pendingChatId();
+String pendingName();
+bool allowPending();
 
 // True if a message arrived that has not been displayed yet.
 bool messagePending();

@@ -53,25 +53,30 @@ because that terminal carries the only free GPIO the board brings out — the RS
 and CAN terminals are on the far side of their transceivers and carry differential
 pairs, not pins you can wire a switch to.
 
-## 3. Optional: set up the Telegram bot
+## 3. Optional: the Telegram bot
 
-Skip this if you only want to add photos over Wi-Fi at home. Do it if you want to
-text photos and notes to the frame from anywhere.
+Skip if you only want to add photos over Wi-Fi at home. Do it if you want to text
+photos and notes to the frame from anywhere.
 
-1. Message **@BotFather** on Telegram and send `/newbot`. Answer its two
-   questions and it hands you a token like `8123456:AAH9x...`.
-2. Paste it into `TELEGRAM_BOT_TOKEN` in `src/config.h`.
-3. Flash, then message your own bot anything. The serial console prints:
-   `[telegram] ignoring message from chat id 123456789`.
-4. Put that number in `TELEGRAM_ALLOWED_CHAT_IDS` and flash again.
+1. Message **@BotFather** and send `/newbot`. It hands you a token like
+   `8123456:AAH9x...`.
+2. Flash the frame, connect to it, and paste the token into the **Send from
+   anywhere** card on its web page.
+3. Message your own bot anything. Reload the page — it will show who messaged and
+   offer **Allow them**. Tap it.
 
-The second flash is not busywork. **Only ids on that allowlist can send to the
-frame**, and the frame has to run once before it can tell you yours. A bot token
-inside a device you have given away is effectively public, so without the
-allowlist anyone who stumbled onto the bot could put anything they liked on her
-picture frame.
+**Do not put the token in `config.h`.** It would go into git history the first
+time you push and stay there even if you delete the line later, and anyone who
+reads it controls your bot. The setup page stores it in NVS instead, which also
+means changing it never needs a reflash.
 
-Add more ids to the same array to let family send photos too.
+If a token ever does leak, `/revoke` in BotFather issues a new one and instantly
+kills the old.
+
+**The allowlist is not optional either.** A token inside a device you have given
+away is effectively public, so without it anyone who found the bot could put
+anything they liked on her picture frame. Repeat step 3 for anyone else you want
+to let send.
 
 ## 4. Set your Wi-Fi password before flashing
 
@@ -165,7 +170,19 @@ tap **RESET** to run the firmware normally.
 
 ## 6. Bench test before you mount anything
 
-Watch the serial monitor through a boot. You want to see all of these:
+**On first boot the frame shows the hardware check on its own screen** — every
+subsystem with a live reading beside it, green for good and red for not. That is
+the fastest way to catch a wiring mistake, because you can see the lux figure move
+as you wave a hand over the sensor. Press right and it walks you through
+calibrating the dimming: lights on, record, lights off, record.
+
+Those two numbers become the ends of the brightness curve, which beats the generic
+indoor defaults — a bright kitchen and a dim bedroom are not the same room. If the
+two readings come out too close together it says so and lets you retry, rather
+than saving a curve with no range in it. You can re-run the whole thing later from
+the **Dimming** card on the web page.
+
+The serial monitor shows the same story. You want to see all of these:
 
 ```
 [buttons] resting at 3283 mV (idle should be above 2600)
@@ -197,6 +214,8 @@ Then check each thing by hand:
 | Tap the left / right half of the screen | Same as the matching button |
 | Press and hold the right half | QR code appears, fully on screen and uncropped |
 | Press and hold the left half | Interval picker appears |
+| First boot | Hardware check appears before the slideshow |
+| Walk the calibration | Lights on, right, lights off, right — lux moves as you do it |
 | Join `Rachel's Frame`, pick her network, Connect | Frame restarts and joins it |
 | Hold right again once joined | QR now carries the LAN address, not a join code |
 | Text your bot a photo | Lands in the shuffle within a few seconds |

@@ -102,6 +102,33 @@ static const char INDEX_HTML[] PROGMEM = R"PAGE(
   </div>
 
   <div class="card">
+    <h2>Send from anywhere <span id="tg-state"></span></h2>
+    <p class="empty" style="margin:0 0 12px">
+      Message <b>@BotFather</b> on Telegram, send <b>/newbot</b>, and paste the
+      token here. Then message your own bot and allow yourself below.
+    </p>
+    <input type="password" id="tg-token" placeholder="Bot token"
+           autocomplete="off" style="width:100%;margin-bottom:10px">
+    <div class="row"><button onclick="saveToken()">Save token</button></div>
+    <div id="tg-pending" hidden style="margin-top:14px">
+      <p class="empty" style="margin:0 0 8px">
+        <b id="tg-who"></b> messaged the bot (id <span id="tg-id"></span>).
+      </p>
+      <div class="row"><button onclick="allowSender()">Allow them</button></div>
+    </div>
+    <div id="tg-log"></div>
+  </div>
+
+  <div class="card">
+    <h2>Dimming <span id="cal-state"></span></h2>
+    <p class="empty" style="margin:0 0 12px">
+      Recalibrating puts a short wizard on the frame itself: turn the room lights
+      on, press the right button, turn them off, press again.
+    </p>
+    <div class="row"><button class="ghost" onclick="recalibrate()">Recalibrate on the frame</button></div>
+  </div>
+
+  <div class="card">
     <h2>Time per photo</h2>
     <div class="opts" id="opts"></div>
   </div>
@@ -336,6 +363,35 @@ async function join(){
   }
 }
 
+// ---- telegram + calibration ----------------------------------------------
+
+const tlog = m => document.getElementById('tg-log').textContent = m;
+
+async function saveToken(){
+  const token = document.getElementById('tg-token').value.trim();
+  tlog('Saving…');
+  try {
+    const r = await fetch('/api/telegram', {
+      method:'POST', body: new URLSearchParams({ token })
+    });
+    if (!r.ok) { tlog(await r.text()); return; }
+    tlog('Saved. The frame is restarting — message your bot, then reload this '
+       + 'page and allow yourself.');
+  } catch (e) { tlog('Could not save that.'); }
+}
+
+async function allowSender(){
+  const r = await fetch('/api/telegram/allow', { method:'POST' });
+  tlog(r.ok ? 'Allowed. Try sending a photo.' : 'Nobody waiting.');
+  refresh();
+}
+
+async function recalibrate(){
+  await fetch('/api/calibrate', { method:'POST' });
+  tlog('');
+  alert('Look at the frame — the wizard is on screen now.');
+}
+
 // ---- controls + status ---------------------------------------------------
 
 async function nav(dir){ await fetch('/api/'+dir, {method:'POST'}); refresh(); }
@@ -369,6 +425,24 @@ async function refresh(){
     } else if (!s.portal) {
       card.hidden = true;
     }
+    document.getElementById('tg-state').textContent =
+      !s.tg_on ? 'off' :
+      s.tg_allowed ? s.tg_allowed + ' sender' + (s.tg_allowed > 1 ? 's' : '')
+                   : 'no senders allowed yet';
+
+    const pend = document.getElementById('tg-pending');
+    if (s.tg_pending){
+      document.getElementById('tg-who').textContent = s.tg_pending_name || 'Someone';
+      document.getElementById('tg-id').textContent = s.tg_pending;
+      pend.hidden = false;
+    } else {
+      pend.hidden = true;
+    }
+
+    document.getElementById('cal-state').textContent = s.calibrated
+      ? s.lux_bright.toFixed(0) + ' / ' + s.lux_dark.toFixed(1) + ' lux'
+      : 'not calibrated';
+
     document.getElementById('s-net').textContent =
       s.portal ? 'own network' : (s.network || '–') + (s.online ? '' : ' (offline)');
     document.getElementById('s-count').textContent =

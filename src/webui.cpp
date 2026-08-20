@@ -9,6 +9,7 @@
 #include "display.h"
 #include "playlist.h"
 #include "storage.h"
+#include "telegram.h"
 #include "web_page.h"
 #include "wifimgr.h"
 
@@ -119,6 +120,18 @@ void routeStatus() {
           String(wifimgr::mode() == wifimgr::Mode::Portal ? "true" : "false");
   json += ",\"network\":\"" + jsonEscape(wifimgr::ssid()) + "\"";
   json += ",\"online\":" + String(wifimgr::online() ? "true" : "false");
+  json += ",\"tg_on\":" + String(telegram::configured() ? "true" : "false");
+  json += ",\"tg_allowed\":" + String(telegram::allowedCount());
+  json += ",\"tg_pending\":\"" +
+          (telegram::pendingChatId() == 0
+               ? String("")
+               : String((long long)telegram::pendingChatId())) +
+          "\"";
+  json += ",\"tg_pending_name\":\"" + jsonEscape(telegram::pendingName()) + "\"";
+  json += ",\"calibrated\":" +
+          String(storage::settings().calibrated ? "true" : "false");
+  json += ",\"lux_bright\":" + String(storage::settings().luxBright, 1);
+  json += ",\"lux_dark\":" + String(storage::settings().luxDark, 2);
   json += ",\"used_mb\":" + String((uint32_t)(storage::cardUsedBytes() / 1048576));
   json += ",\"total_mb\":" + String((uint32_t)(storage::cardSizeBytes() / 1048576));
   json += "}";
@@ -234,6 +247,31 @@ void routeJoin() {
   ESP.restart();
 }
 
+void routeTelegram() {
+  if (!telegram::setToken(g_server.arg("token"))) {
+    g_server.send(400, "text/plain", "that does not look like a bot token");
+    return;
+  }
+  // Storing a token mid-run is fine — polling picks it up on the next pass — but
+  // a restart is the simplest way to get a clean TLS client either way.
+  g_server.send(200, "text/plain", "ok");
+  delay(400);
+  ESP.restart();
+}
+
+void routeTelegramAllow() {
+  if (!telegram::allowPending()) {
+    g_server.send(400, "text/plain", "nobody waiting");
+    return;
+  }
+  g_server.send(200, "text/plain", "ok");
+}
+
+void routeCalibrate() {
+  if (g_hooks.onCalibrate) g_hooks.onCalibrate();
+  g_server.send(200, "text/plain", "ok");
+}
+
 void routeForget() {
   wifimgr::forgetCredentials();
   g_server.send(200, "text/plain", "ok");
@@ -266,6 +304,9 @@ bool begin(const Hooks &hooks) {
   g_server.on("/api/scan", HTTP_GET, routeScan);
   g_server.on("/api/join", HTTP_POST, routeJoin);
   g_server.on("/api/forget", HTTP_POST, routeForget);
+  g_server.on("/api/telegram", HTTP_POST, routeTelegram);
+  g_server.on("/api/telegram/allow", HTTP_POST, routeTelegramAllow);
+  g_server.on("/api/calibrate", HTTP_POST, routeCalibrate);
 
   g_server.on(
       "/api/upload", HTTP_POST, []() { finishUpload(true); },

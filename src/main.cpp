@@ -24,6 +24,7 @@
 #include "display.h"
 #include "photos.h"
 #include "playlist.h"
+#include "setupui.h"
 #include "storage.h"
 #include "telegram.h"
 #include "touch.h"
@@ -217,6 +218,12 @@ bool goShow(const char *name) {
   return true;
 }
 
+// Re-run the first-boot wizard from the web page.
+void onCalibrate() {
+  display::setBrightness(storage::settings().brightnessMax);
+  setupui::begin();
+}
+
 void onPhotosChanged() {
   playlist::rescan();
   g_preparedName = "";
@@ -234,12 +241,17 @@ void onPhotosChanged() {
 
 uint8_t brightnessForLux(float lux) {
   const storage::Settings &s = storage::settings();
-  if (lux <= LUX_AT_MIN_BRIGHTNESS) return s.brightnessMin;
-  if (lux >= LUX_AT_MAX_BRIGHTNESS) return s.brightnessMax;
+  // The endpoints come from the calibration if one was done, and from the
+  // generic indoor defaults otherwise. A measured pair is much better: a bright
+  // kitchen and a dim bedroom are nowhere near the same room.
+  const float dark = s.luxDark;
+  const float bright = s.luxBright;
+
+  if (lux <= dark) return s.brightnessMin;
+  if (lux >= bright) return s.brightnessMax;
 
   // Logarithmic, because perceived brightness is.
-  float t = logf(lux / LUX_AT_MIN_BRIGHTNESS) /
-            logf(LUX_AT_MAX_BRIGHTNESS / LUX_AT_MIN_BRIGHTNESS);
+  float t = logf(lux / dark) / logf(bright / dark);
   return (uint8_t)(s.brightnessMin + t * (s.brightnessMax - s.brightnessMin));
 }
 
@@ -405,6 +417,7 @@ void setup() {
   hooks.onPrev = goPrev;
   hooks.onPhotosChanged = onPhotosChanged;
   hooks.onShow = goShow;
+  hooks.onCalibrate = onCalibrate;
   hooks.getLux = currentLux;
   webui::begin(hooks);
   telegram::begin();
@@ -412,8 +425,14 @@ void setup() {
   Serial.printf("[boot] ready — %u photos, %s per photo\n", playlist::count(),
                 intervalLabel(storage::settings().intervalIndex));
 
-  showCurrent();
-  prepareNext();
+  // First boot with a light sensor attached and no calibration on file: show the
+  // hardware check and walk through calibrating, before anything else.
+  if (!storage::settings().calibrated) {
+    setupui::begin();
+  } else {
+    showCurrent();
+    prepareNext();
+  }
   g_lastInteraction = millis();
 }
 
@@ -421,10 +440,24 @@ void loop() {
   wifimgr::loop();
   webui::loop();
 
-  // Buttons and touch speak the same event vocabulary, so the state machine
-  // below neither knows nor cares which one acted.
-  handleButton(buttons::poll());
-  handleButton(touch::poll());
+  // Buttons and touch speak the same event vocabulary, so neither the wizard nor
+  // the state machine below learns which one acted.
+  buttons::Event e = buttons::poll();
+  if (e == buttons::EVENT_NONE) e = touch::poll();
+
+  // While the wizard owns the screen it gets the events, and dimming is left
+  // alone so the live lux reading is not fighting a brightness ramp.
+  if (setupui::active()) {
+    setupui::tick();
+    if (setupui::handle(e)) {
+      display::setBrightness(storage::settings().brightnessMax);
+      showCurrent();
+      prepareNext();
+    }
+    return;
+  }
+
+  handleButton(e);
 
   updateDimming();
 

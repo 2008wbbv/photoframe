@@ -184,26 +184,19 @@ static const uint8_t WIFI_SCAN_MAX_RESULTS = 20;
 // ---------------------------------------------------------------------------
 //
 // Nothing gets installed on the ESP32 for this. Telegram has a plain HTTPS REST
-// API, so the frame is only making web requests to api.telegram.org. Setup:
+// API, so the frame is only making web requests to api.telegram.org.
 //
-//   1. Message @BotFather on Telegram and send /newbot.
-//   2. Paste the token it gives you below.
-//   3. Flash, then message your own bot. The serial console prints the chat id
-//      of whoever talks to it — put that id in the allowlist below and reflash.
+// The bot token and the allowlist are deliberately NOT here. A token in a source
+// file ends up in git history the moment the repo is pushed, and it stays there
+// even if the line is deleted later — anyone who reads it controls the bot. They
+// live in NVS instead and are entered through the setup page, which also means
+// changing them never needs a reflash.
 //
-// Leave the token empty to disable all of this; the frame works exactly as it
-// did before, just without remote sending.
-static const char *const TELEGRAM_BOT_TOKEN = "";
+// Setup: message @BotFather, send /newbot, then paste the token into the frame's
+// web page. Message the bot once and the page will offer to allow your chat id.
 
-// ONLY these chat ids may send to the frame. This is not optional hardening: a
-// bot token sitting inside a device you have given away is effectively public,
-// and without an allowlist anyone who found the bot could put anything at all on
-// someone's picture frame. Add your own id, and any family you want to let in.
-static const int64_t TELEGRAM_ALLOWED_CHAT_IDS[] = {
-    0,  // replace with your chat id, e.g. 123456789
-};
-static const size_t TELEGRAM_ALLOWED_COUNT =
-    sizeof(TELEGRAM_ALLOWED_CHAT_IDS) / sizeof(TELEGRAM_ALLOWED_CHAT_IDS[0]);
+// How many senders may be allowed at once.
+static const uint8_t TELEGRAM_MAX_ALLOWED = 8;
 
 // How often to ask whether anything new has arrived. This is a short poll rather
 // than a 30-second long poll on purpose: the main loop is single-threaded, and
@@ -267,6 +260,15 @@ static const float LUX_AT_MAX_BRIGHTNESS = 400.0f;
 // Below this, turn the panel off entirely. A button press wakes it.
 static const float NIGHT_LUX_DEFAULT = 1.0f;
 static const uint32_t NIGHT_WAKE_MS = 30UL * 1000;
+
+// First-boot calibration. Averaging a handful of readings keeps a flicker or a
+// passing shadow from becoming the reference point.
+static const uint8_t CALIB_SAMPLES = 8;
+static const uint32_t CALIB_SAMPLE_GAP_MS = 60;
+static const uint32_t CALIB_REFRESH_MS = 400;
+// The lit reading must be at least this many times the dark one, or there is no
+// range to dim across and the calibration is rejected.
+static const float CALIB_MIN_RATIO = 3.0f;
 
 static const uint32_t LUX_SAMPLE_INTERVAL_MS = 200;
 static const float LUX_SMOOTHING = 0.15f;  // EMA weight on each new sample

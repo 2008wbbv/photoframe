@@ -65,6 +65,21 @@ void drawIntervalMenu(const char *label, uint8_t index, uint8_t count);
 // A centred message card, used for "no photos yet" and error states.
 void drawMessage(const char *title, const char *line1, const char *line2);
 
+// One line of the first-boot hardware check.
+struct DiagRow {
+  const char *label;
+  const char *value;
+  bool ok;
+};
+
+// Full-screen hardware check: every subsystem with a live reading beside it.
+void drawDiagnostics(const DiagRow *rows, uint8_t count, const char *footer);
+
+// Full-screen calibration step. `lux` is shown live so you can watch it move as
+// the room lights change; pass a negative value to hide it.
+void drawCalibration(const char *step, const char *title, const char *line1,
+                     const char *line2, float lux, const char *footer);
+
 // A note sent to the frame. Wraps to the card width and is not dimmed, so it
 // stays readable in a dark room.
 void drawNote(const char *from, const char *text);

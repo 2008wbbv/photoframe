@@ -20,6 +20,7 @@ struct Hooks {
   void (*onPrev)() = nullptr;
   void (*onPhotosChanged)() = nullptr;  // fired after an upload or delete
   bool (*onShow)(const char *name) = nullptr;  // jump to one photo from the gallery
+  void (*onCalibrate)() = nullptr;  // re-run the first-boot wizard on the panel
   float (*getLux)() = nullptr;
 };
 

@@ -64,8 +64,8 @@ and photos live on the SD card.
 
 The first build pulls a few hundred MB of toolchain, so give it a few minutes.
 
-Verified building clean against Arduino core 3.3.9: **flash 1.24 MB of 6.55 MB
-(18.8%), RAM 87 KB of 320 KB (26.4%)**, with the two 750 KB image buffers coming
+Verified building clean against Arduino core 3.3.9: **flash 1.36 MB of 6.55 MB
+(20.7%), RAM 87 KB of 320 KB (26.7%)**, with the two 750 KB image buffers coming
 out of PSRAM on top of that.
 
 ### A note on the platform line
@@ -130,14 +130,19 @@ requests to `api.telegram.org`:
 | `file/…` | downloads the JPEG, streamed straight to the SD card |
 | `sendMessage` | acknowledges back to the sender |
 
-Setup is three steps: message **@BotFather**, send `/newbot`, paste the token into
-`config.h`. Then message your own bot once — the serial console prints the chat id
-of whoever talks to it, and you add that to the allowlist.
+Setup: message **@BotFather**, send `/newbot`, paste the token into the frame's
+web page. Message your own bot once, reload the page, and it offers to allow you.
 
-**The allowlist is not optional.** A bot token living inside a device you have
-given away is effectively public, and without it anyone who found the bot could
-put anything at all on someone's picture frame. Only ids in
-`TELEGRAM_ALLOWED_CHAT_IDS` are accepted; everything else is logged and dropped.
+**The token is stored in NVS, not in `config.h`, on purpose.** A token in a source
+file lands in git history the first time the repo is pushed and stays there even
+if the line is later deleted — and anyone who reads it controls the bot. Keeping
+it in NVS also means changing it never needs a reflash. If one does leak,
+`/revoke` in BotFather kills it immediately.
+
+**The allowlist is not optional either.** A token inside a device you have given
+away is effectively public, and without it anyone who found the bot could put
+anything at all on someone's picture frame. Unknown senders are remembered so the
+page can offer to allow them, and dropped until you do.
 
 Two honest notes. Polling is a short poll every five seconds rather than a
 30-second long poll, because the main loop is single-threaded and parking it
@@ -152,6 +157,26 @@ Photos arriving this way are **not** cropped to 800×480 the way web uploads are
 the phone is not doing the resizing, so they letterbox to fit. Telegram offers
 each photo at several resolutions and the frame takes the largest one under
 `TELEGRAM_MAX_PHOTO_WIDTH`.
+
+### First boot: checking and calibrating
+
+The first time it starts, the frame puts a hardware check on its own screen
+rather than in a log nobody reads — light sensor, touchscreen, buttons, card,
+Wi-Fi, each with a live reading and marked good or not. Waving a hand over the
+sensor moves the lux figure on screen, which is the quickest way to confirm the
+sensor faces the room and not the panel.
+
+Then it calibrates the dimming: **lights on, press right, lights off, press
+right.** Those two readings become the ends of the brightness curve.
+
+This matters more than it sounds. The defaults are generic indoor guesses, and a
+bright kitchen and a dim bedroom are nowhere near the same room — a curve tuned
+for one looks wrong in the other. Measuring takes fifteen seconds and it is the
+room the frame actually lives in.
+
+A calibration whose two readings are within a factor of three of each other is
+rejected, since a curve with no range in it would dim nothing; the wizard says so
+and lets you retry. Re-run it any time from the **Dimming** card on the web page.
 
 ### Her Wi-Fi, without you knowing the password
 
@@ -228,6 +253,7 @@ src/
   playlist.cpp   shuffle and navigation
   buttons.cpp    ADC ladder decode, debounce, short vs long press
   touch.cpp      GT911 driver, gestures mapped onto button events
+  setupui.cpp    first-boot hardware check and dimming calibration
   wifimgr.cpp    station/portal modes, credentials in NVS, network scan
   telegram.cpp   HTTPS polling, photo download, allowlist
   bh1750.cpp     light sensor
@@ -264,5 +290,6 @@ so re-dimming is a re-blit and never a re-decode.
 | Photos advance by themselves; menus open unprompted | GPIO6 is floating. The button ladder's 10k pull-up is missing. |
 | Both buttons do the same thing | The right button's 10k series resistor is missing or bridged. |
 | Photos letterboxed with black bars | Added by hand to the card, or sent via Telegram — neither path crops to 800×480 the way a web upload does. |
-| Telegram messages ignored | Your chat id is not in `TELEGRAM_ALLOWED_CHAT_IDS`. The console prints the id of anyone who tries. |
+| Telegram messages ignored | Your chat id is not allowed yet. Reload the web page — it offers to allow whoever last messaged. |
+| Dimming feels wrong for the room | Recalibrate from the web page. The defaults are generic indoor guesses. |
 | Frame stuck hosting its own network | It could not join the stored network. Connect to `Rachel's Frame` and the setup card will be waiting on the page. |

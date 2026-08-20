@@ -84,12 +84,26 @@ bool loadSettings() {
       g_settings.brightnessMax = (uint8_t)constrain(value.toInt(), 0, 255);
     } else if (key == "night_lux") {
       g_settings.nightLux = value.toFloat();
+    } else if (key == "calibrated") {
+      g_settings.calibrated = (value.toInt() != 0);
+    } else if (key == "lux_bright") {
+      g_settings.luxBright = value.toFloat();
+    } else if (key == "lux_dark") {
+      g_settings.luxDark = value.toFloat();
     }
   }
   f.close();
 
   if (g_settings.brightnessMax < g_settings.brightnessMin) {
     g_settings.brightnessMax = g_settings.brightnessMin;
+  }
+  // A curve whose endpoints are equal or inverted would divide by zero in the
+  // logarithm, so refuse to trust a calibration that does not make sense.
+  if (g_settings.luxDark < 0.05f) g_settings.luxDark = 0.05f;
+  if (g_settings.luxBright <= g_settings.luxDark * 2.0f) {
+    g_settings.calibrated = false;
+    g_settings.luxDark = LUX_AT_MIN_BRIGHTNESS;
+    g_settings.luxBright = LUX_AT_MAX_BRIGHTNESS;
   }
   return true;
 }
@@ -106,6 +120,9 @@ bool saveSettings() {
   f.printf("brightness_min=%u\n", g_settings.brightnessMin);
   f.printf("brightness_max=%u\n", g_settings.brightnessMax);
   f.printf("night_lux=%.2f\n", g_settings.nightLux);
+  f.printf("calibrated=%d\n", g_settings.calibrated ? 1 : 0);
+  f.printf("lux_bright=%.2f\n", g_settings.luxBright);
+  f.printf("lux_dark=%.2f\n", g_settings.luxDark);
   f.close();
   return true;
 }

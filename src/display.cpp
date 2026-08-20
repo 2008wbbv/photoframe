@@ -380,4 +380,55 @@ void drawNote(const char *from, const char *text) {
   }
 }
 
+void drawDiagnostics(const DiagRow *rows, uint8_t count, const char *footer) {
+  // Full-screen rather than a card: this is the only thing on show, and the
+  // point is that it is readable from arm's length while you are still holding
+  // a soldering iron.
+  for (uint32_t i = 0; i < SCREEN_PIXELS; i++) g_fb[i] = CARD_BG;
+
+  drawCentered("Checking the hardware", SCREEN_W / 2, 46, 3, TEXT_PRIMARY);
+
+  const int16_t left = 180;
+  const int16_t right = SCREEN_W - 180;
+  int16_t y = 130;
+
+  for (uint8_t i = 0; i < count; i++) {
+    drawLeft(rows[i].label, left, y, 2, TEXT_MUTED);
+
+    const char *value = rows[i].value;
+    int16_t w = (int16_t)(strlen(value) * 12);
+    g_gfx->setTextSize(2);
+    g_gfx->setTextColor(rows[i].ok ? ACCENT : 0xF9A6);  // green-ish vs red
+    g_gfx->setCursor(right - w, y);
+    g_gfx->print(value);
+
+    y += 44;
+  }
+
+  drawCentered(footer, SCREEN_W / 2, SCREEN_H - 54, 2, TEXT_MUTED);
+}
+
+void drawCalibration(const char *step, const char *title, const char *line1,
+                     const char *line2, float lux, const char *footer) {
+  for (uint32_t i = 0; i < SCREEN_PIXELS; i++) g_fb[i] = CARD_BG;
+
+  drawCentered(step, SCREEN_W / 2, 44, 2, TEXT_MUTED);
+  drawCentered(title, SCREEN_W / 2, 84, 4, TEXT_PRIMARY);
+
+  if (line1 && *line1) drawCentered(line1, SCREEN_W / 2, 168, 2, TEXT_PRIMARY);
+  if (line2 && *line2) drawCentered(line2, SCREEN_W / 2, 200, 2, TEXT_MUTED);
+
+  if (lux >= 0.0f) {
+    // Live, so you can see the number react as the lights go on and off — which
+    // is also the quickest way to tell the sensor is pointed at the room and not
+    // at the panel.
+    char reading[32];
+    snprintf(reading, sizeof(reading), "%.0f lux", (double)lux);
+    drawCentered("READING NOW", SCREEN_W / 2, 274, 1, TEXT_MUTED);
+    drawCentered(reading, SCREEN_W / 2, 296, 5, ACCENT);
+  }
+
+  drawCentered(footer, SCREEN_W / 2, SCREEN_H - 54, 2, TEXT_MUTED);
+}
+
 }  // namespace display

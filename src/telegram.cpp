@@ -1,6 +1,7 @@
 #include "telegram.h"
 
 #include <HTTPClient.h>
+#include <Preferences.h>
 #include <SD.h>
 #include <esp_random.h>
 #include <WiFiClientSecure.h>
@@ -13,6 +14,20 @@ namespace telegram {
 namespace {
 
 const char *const HOST = "api.telegram.org";
+
+Preferences g_prefs;
+
+// Kept in NVS rather than in the firmware. A token compiled into a source file
+// ends up in git history the first time the repo is pushed and stays there even
+// if the line is later removed — and anyone holding it controls the bot.
+String g_token;
+int64_t g_allowedIds[TELEGRAM_MAX_ALLOWED];
+uint8_t g_allowedCount = 0;
+
+// Last sender we turned away, so the setup page can offer to allow them without
+// anybody having to read a serial console.
+int64_t g_pendingId = 0;
+String g_pendingName;
 
 int32_t g_offset = 0;  // highest update_id seen, so updates are not re-fetched
 uint32_t g_lastPoll = 0;
@@ -27,10 +42,35 @@ bool g_pending = false;
 WiFiClientSecure *g_tls = nullptr;
 
 bool allowed(int64_t chatId) {
-  for (size_t i = 0; i < TELEGRAM_ALLOWED_COUNT; i++) {
-    if (TELEGRAM_ALLOWED_CHAT_IDS[i] == chatId) return true;
+  for (uint8_t i = 0; i < g_allowedCount; i++) {
+    if (g_allowedIds[i] == chatId) return true;
   }
   return false;
+}
+
+void loadAllowed() {
+  g_allowedCount = 0;
+  String packed = g_prefs.getString("tgids", "");
+  int from = 0;
+  while (from < (int)packed.length() && g_allowedCount < TELEGRAM_MAX_ALLOWED) {
+    int comma = packed.indexOf(',', from);
+    String piece = comma < 0 ? packed.substring(from) : packed.substring(from, comma);
+    piece.trim();
+    if (piece.length() > 0) {
+      g_allowedIds[g_allowedCount++] = (int64_t)atoll(piece.c_str());
+    }
+    if (comma < 0) break;
+    from = comma + 1;
+  }
+}
+
+void saveAllowed() {
+  String packed;
+  for (uint8_t i = 0; i < g_allowedCount; i++) {
+    if (i) packed += ',';
+    packed += String((long long)g_allowedIds[i]);
+  }
+  g_prefs.putString("tgids", packed);
 }
 
 // Minimal JSON field extraction. A full parser would cost more flash and RAM
@@ -118,7 +158,7 @@ bool download(const String &filePath, const String &destPath) {
   HTTPClient http;
   http.setTimeout(TELEGRAM_HTTP_TIMEOUT_MS);
   String url = "https://" + String(HOST) + "/file/bot" +
-               TELEGRAM_BOT_TOKEN + "/" + filePath;
+               g_token + "/" + filePath;
   if (!http.begin(*g_tls, url)) return false;
 
   int code = http.GET();
@@ -214,7 +254,7 @@ void reply(int64_t chatId, const String &text) {
       encoded += buf;
     }
   }
-  request("/bot" + String(TELEGRAM_BOT_TOKEN) + "/sendMessage?chat_id=" +
+  request("/bot" + g_token + "/sendMessage?chat_id=" +
               String((long long)chatId) + "&text=" + encoded,
           nullptr);
 }
@@ -225,22 +265,24 @@ bool handleUpdate(const String &update, bool *messageArrived) {
   int chatAt = update.indexOf("\"chat\":");
   if (chatAt >= 0) chatId = findNumber(update, "id", chatAt);
 
-  if (!allowed(chatId)) {
-    // Printed so you can find your own id and add it, and so an unexpected
-    // sender is visible rather than silently swallowed.
-    Serial.printf("[telegram] ignoring message from chat id %lld\n",
-                  (long long)chatId);
-    return false;
-  }
-
   String from = findString(update, "first_name");
   if (from.length() == 0) from = "Someone";
+
+  if (!allowed(chatId)) {
+    // Remembered rather than just dropped, so the setup page can offer to allow
+    // this sender. Also printed, for anyone watching the console instead.
+    g_pendingId = chatId;
+    g_pendingName = from;
+    Serial.printf("[telegram] message from unallowed chat id %lld (%s)\n",
+                  (long long)chatId, from.c_str());
+    return false;
+  }
 
   // A photo, possibly with a caption.
   String fileId = bestPhotoFileId(update);
   if (fileId.length() > 0) {
     String meta;
-    if (!request("/bot" + String(TELEGRAM_BOT_TOKEN) + "/getFile?file_id=" +
+    if (!request("/bot" + g_token + "/getFile?file_id=" +
                      fileId,
                  &meta)) {
       return false;
@@ -287,11 +329,44 @@ bool handleUpdate(const String &update, bool *messageArrived) {
 
 }  // namespace
 
-bool configured() {
-  return TELEGRAM_BOT_TOKEN[0] != '\0' && TELEGRAM_ALLOWED_COUNT > 0;
+bool configured() { return g_token.length() > 0; }
+
+bool hasAllowedSenders() { return g_allowedCount > 0; }
+
+int64_t pendingChatId() { return g_pendingId; }
+
+String pendingName() { return g_pendingName; }
+
+bool allowPending() {
+  if (g_pendingId == 0 || g_allowedCount >= TELEGRAM_MAX_ALLOWED) return false;
+  g_allowedIds[g_allowedCount++] = g_pendingId;
+  saveAllowed();
+  Serial.printf("[telegram] allowed chat id %lld\n", (long long)g_pendingId);
+  g_pendingId = 0;
+  g_pendingName = "";
+  return true;
+}
+
+uint8_t allowedCount() { return g_allowedCount; }
+
+bool setToken(const String &token) {
+  // Telegram tokens look like 8123456:AAH... — enough of a shape to catch a
+  // paste of the wrong thing entirely.
+  if (token.length() > 0 && (token.length() < 20 || token.indexOf(':') < 0)) {
+    return false;
+  }
+  g_token = token;
+  g_prefs.putString("tgtoken", token);
+  Serial.println(token.length() ? "[telegram] token stored"
+                                : "[telegram] token cleared");
+  return true;
 }
 
 void begin() {
+  g_prefs.begin(NVS_NAMESPACE, /* readOnly */ false);
+  g_token = g_prefs.getString("tgtoken", "");
+  loadAllowed();
+
   if (!configured()) {
     Serial.println("[telegram] no bot token — remote sending disabled");
     return;
@@ -309,19 +384,28 @@ void begin() {
   g_tls->setTimeout(TELEGRAM_HTTP_TIMEOUT_MS / 1000);
 
   Serial.printf("[telegram] ready, %u allowed sender(s)\n",
-                (unsigned)TELEGRAM_ALLOWED_COUNT);
+                (unsigned)g_allowedCount);
 }
 
 bool poll() {
-  if (!configured() || g_tls == nullptr) return false;
+  if (!configured()) return false;
   if (!wifimgr::online()) return false;
+
+  // The token can arrive from the setup page long after boot, so the TLS client
+  // is created on first use rather than only in begin().
+  if (g_tls == nullptr) {
+    g_tls = new WiFiClientSecure();
+    if (g_tls == nullptr) return false;
+    g_tls->setInsecure();
+    g_tls->setTimeout(TELEGRAM_HTTP_TIMEOUT_MS / 1000);
+  }
 
   uint32_t now = millis();
   if (now - g_lastPoll < TELEGRAM_POLL_INTERVAL_MS) return false;
   g_lastPoll = now;
 
   String body;
-  String path = "/bot" + String(TELEGRAM_BOT_TOKEN) +
+  String path = "/bot" + g_token +
                 "/getUpdates?limit=1&timeout=0&allowed_updates=[\"message\"]";
   if (g_offset > 0) path += "&offset=" + String(g_offset);
 

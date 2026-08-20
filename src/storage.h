@@ -20,6 +20,13 @@ struct Settings {
   uint8_t brightnessMin = BRIGHTNESS_MIN_DEFAULT;
   uint8_t brightnessMax = BRIGHTNESS_MAX_DEFAULT;
   float nightLux = NIGHT_LUX_DEFAULT;
+
+  // Measured in the room the frame actually lives in, rather than guessed.
+  // luxBright is what the room reads with the lights on, luxDark with them off;
+  // the brightness curve runs between those two points.
+  bool calibrated = false;
+  float luxBright = LUX_AT_MAX_BRIGHTNESS;
+  float luxDark = LUX_AT_MIN_BRIGHTNESS;
 };
 
 // Mounts the card and makes sure /photos and /thumbs exist.
